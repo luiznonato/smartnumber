@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -25,6 +26,17 @@ type AnalyticsGame = {
   explanation: Record<string, unknown>;
 };
 
+type AnalyticsGeneration = {
+  strategy: string;
+  strategy_version: string;
+  seed: number;
+  prng: string;
+  score_version: string | null;
+  sample: { n: number; window: number | null };
+  parameters?: Record<string, unknown>;
+  games: AnalyticsGame[];
+};
+
 type ProcessRevisionResult = {
   revisionId: string;
   duplicate: boolean;
@@ -40,6 +52,8 @@ type ImportOptions = {
   nextPublication?: CaixaFetchResult["nextContest"];
   sourceLatestContest?: number;
   sourceUpdatedAt?: Date;
+  sourceVerifiedAt?: Date;
+  accumulated?: boolean | null;
 };
 
 export function generateLuckyMonth(monthSeed: string, index: number): number {
@@ -75,6 +89,7 @@ export class LotteryFlowService {
     });
     if (existing) {
       await this.applyOfficialMetadata(existing.id, input.lottery, options);
+      await this.updateCoverage(input.lottery);
       return {
         revisionId: existing.id,
         duplicate: true,
@@ -123,6 +138,8 @@ export class LotteryFlowService {
           rawPayload: sourcePayload as Prisma.InputJsonValue,
           payloadHash: hash,
           parserVersion: input.parserVersion,
+          sourceVerifiedAt: options.sourceVerifiedAt,
+          accumulated: options.accumulated,
           prizeTiers:
             options.prizes === null || options.prizes === undefined
               ? undefined
@@ -178,6 +195,7 @@ export class LotteryFlowService {
       });
       return created;
     });
+    await this.updateCoverage(input.lottery);
     return {
       revisionId: revision.id,
       duplicate: false,
@@ -294,6 +312,15 @@ export class LotteryFlowService {
       await this.completeJob(job.id, result);
       return { revisionId: revision.id, duplicate: false, ...result };
     }
+    if (confirmedCount < 10) {
+      const snapshotId = await this.recalculateAnalysisOnly(input.lottery);
+      const result = {
+        analysisStatus: "WAITING_FOR_STRATEGY_SAMPLE",
+        snapshotId,
+      };
+      await this.completeJob(job.id, result);
+      return { revisionId: revision.id, duplicate: false, ...result };
+    }
     const analysis = await this.recalculate(input.lottery);
     const result = {
       snapshotId: analysis.snapshotId,
@@ -324,6 +351,8 @@ export class LotteryFlowService {
         nextPublication: fetched.nextContest,
         sourceLatestContest: fetched.input.contestNumber,
         sourceUpdatedAt: fetched.fetchedAt,
+        sourceVerifiedAt: fetched.fetchedAt,
+        accumulated: fetched.accumulated,
       });
     } catch (error) {
       await this.recordSourceFailure(slug, undefined, error);
@@ -421,6 +450,8 @@ export class LotteryFlowService {
           sourceLatestContest:
             contest === endContest ? endContest : undefined,
           sourceUpdatedAt: fetched.fetchedAt,
+          sourceVerifiedAt: fetched.fetchedAt,
+          accumulated: fetched.accumulated,
         });
         accepted += 1;
         read += 1;
@@ -520,6 +551,126 @@ export class LotteryFlowService {
     };
   }
 
+  async latestDraw(slug: LotterySlug) {
+    const lottery = await this.prisma.lottery.findUnique({
+      where: { slug },
+    });
+    if (!lottery) {
+      return {
+        lottery: slug,
+        state: "NO_RESULTS",
+        draw: null,
+        coverage: null,
+        lastVerification: null,
+      };
+    }
+    const draw = await this.prisma.draw.findFirst({
+      where: {
+        lotteryId: lottery.id,
+        canonicalRevisionId: { not: null },
+      },
+      orderBy: { contestNumber: "desc" },
+      include: {
+        revisions: { include: { prizeTiers: true } },
+      },
+    });
+    const lastVerification = await this.prisma.sourceFetch.findFirst({
+      where: { lotterySlug: slug },
+      orderBy: { fetchedAt: "desc" },
+    });
+    if (!draw?.canonicalRevisionId) {
+      return {
+        lottery: slug,
+        state: "NO_RESULTS",
+        draw: null,
+        coverage: lottery.dataCoverage,
+        lastVerification,
+      };
+    }
+    const revision = draw.revisions.find(
+      (candidate) => candidate.id === draw.canonicalRevisionId,
+    )!;
+    return {
+      lottery: slug,
+      state: lottery.freshnessStatus,
+      sourceLatestContest: lottery.sourceLatestContest,
+      draw: {
+        contestNumber: draw.contestNumber,
+        drawDate: draw.drawDate.toISOString().slice(0, 10),
+        numbers: revision.numbers,
+        originalOrder: revision.originalOrder,
+        luckyMonth: revision.luckyMonth,
+        accumulated: revision.accumulated,
+        prizeState: revision.prizeState,
+        prizeTiers: revision.prizeTiers.map((tier) => ({
+          label: tier.label,
+          hits: tier.hits,
+          luckyMonthRequired: tier.luckyMonthRequired,
+          winners: tier.winners,
+          amountCents: tier.amountCents?.toString() ?? null,
+        })),
+        sourceUrl: revision.sourceUrl,
+        fetchedAt: revision.fetchedAt,
+        sourceVerifiedAt: revision.sourceVerifiedAt,
+      },
+      nextContest: {
+        contestNumber: lottery.nextContestNumber,
+        drawDate: lottery.nextDrawDate?.toISOString().slice(0, 10) ?? null,
+        estimatedPrizeCents:
+          lottery.estimatedPrizeCents?.toString() ?? null,
+      },
+      coverage: lottery.dataCoverage,
+      lastVerification: lastVerification
+        ? {
+            fetchedAt: lastVerification.fetchedAt,
+            statusCode: lastVerification.statusCode,
+            error: lastVerification.error,
+          }
+        : null,
+    };
+  }
+
+  async recalculateAnalysisOnly(slug: LotterySlug) {
+    const dataset = await this.dataset(slug);
+    if (dataset.draws.length < 2) {
+      throw new BadRequestException("São necessários pelo menos dois concursos");
+    }
+    const analysis = await this.analytics("/v1/analyze", {
+      dataset,
+      windows: [10, 25, 50, 100, 250],
+    });
+    const lottery = await this.prisma.lottery.findUniqueOrThrow({
+      where: { slug },
+    });
+    const snapshot = await this.prisma.analysisSnapshot.upsert({
+      where: {
+        lotteryId_cutoffContest_datasetHash_version: {
+          lotteryId: lottery.id,
+          cutoffContest: dataset.contest_numbers.at(-1)!,
+          datasetHash: dataset.dataset_hash,
+          version: "descriptive-v1",
+        },
+      },
+      update: {
+        status: "PUBLISHED",
+        windows: [10, 25, 50, 100, 250],
+        metadata: analysis as Prisma.InputJsonValue,
+        publishedAt: new Date(),
+      },
+      create: {
+        lotteryId: lottery.id,
+        cutoffContest: dataset.contest_numbers.at(-1)!,
+        datasetHash: dataset.dataset_hash,
+        version: "descriptive-v1",
+        status: "PUBLISHED",
+        windows: [10, 25, 50, 100, 250],
+        metadata: analysis as Prisma.InputJsonValue,
+        publishedAt: new Date(),
+      },
+    });
+    return snapshot.id;
+  }
+
   async recalculate(slug: LotterySlug) {
     const dataset = await this.dataset(slug);
     if (dataset.draws.length < 2) {
@@ -539,12 +690,10 @@ export class LotteryFlowService {
       fixed: [],
       excluded: [],
       max_overlap: rules.simplePick - 2,
-    })) as {
-      seed: number;
-      prng: string;
-      score_version: string;
-      games: AnalyticsGame[];
-    };
+      window: 50,
+      alpha: 10,
+      tau: 1,
+    })) as AnalyticsGeneration;
     const monthSeed =
       slug === "dia-de-sorte"
         ? createHash("sha256")
@@ -599,13 +748,18 @@ export class LotteryFlowService {
       });
       const strategyVersion = await tx.strategyVersion.upsert({
         where: {
-          strategyId_version: { strategyId: strategy.id, version: "1.0.0" },
+          strategyId_version: { strategyId: strategy.id, version: "2.0.0" },
         },
         update: {},
         create: {
           strategyId: strategy.id,
-          version: "1.0.0",
-          parameters: { smoothing: "count+1", weightedWithoutReplacement: true },
+          version: "2.0.0",
+          parameters: {
+            window: 50,
+            alpha: 10,
+            tau: 1,
+            weightedWithoutReplacement: true,
+          },
           status: "ACTIVE",
         },
       });
@@ -626,7 +780,7 @@ export class LotteryFlowService {
               }
             : {},
           datasetHash: dataset.dataset_hash,
-          scoreVersion: generation.score_version,
+          scoreVersion: generation.score_version ?? "none",
           status: "PUBLISHED",
           previousBatchId: previous?.id,
           publishedAt: new Date(),
@@ -636,7 +790,7 @@ export class LotteryFlowService {
               luckyMonth: monthSeed
                 ? generateLuckyMonth(monthSeed, index)
                 : null,
-              score: game.score ?? 0,
+              score: game.score,
               scoreBreakdown: {
                 ...game.explanation,
                 ...(monthSeed
@@ -661,34 +815,414 @@ export class LotteryFlowService {
     return { snapshotId: result.snapshot.id, batchId: result.batch.id };
   }
 
+  async generationOptions(slug: LotterySlug) {
+    const dataset = await this.dataset(slug);
+    const lottery = await this.prisma.lottery.findUnique({ where: { slug } });
+    const first = dataset.contest_numbers[0] ?? null;
+    const last = dataset.contest_numbers.at(-1) ?? null;
+    return {
+      lottery: slug,
+      sample: { n: dataset.draws.length, firstContest: first, lastContest: last },
+      freshnessStatus: lottery?.freshnessStatus ?? "NO_RESULTS",
+      strategies: [
+        {
+          id: "uniform",
+          label: "Aleatório — sem análise histórica",
+          minimumSample: 0,
+          available: true,
+          hasScore: false,
+        },
+        {
+          id: "recent-frequency",
+          label: "Frequência histórica recente",
+          minimumSample: 10,
+          available: dataset.draws.length >= 10,
+          hasScore: false,
+        },
+        {
+          id: "historical-profile",
+          label: "Perfil histórico",
+          minimumSample: 25,
+          available: dataset.draws.length >= 25,
+          hasScore: true,
+        },
+        {
+          id: "diversified",
+          label: "Carteira diversificada",
+          minimumSample: 10,
+          available: dataset.draws.length >= 10,
+          hasScore: false,
+        },
+      ],
+    };
+  }
+
+  async latestAnalysis(slug: LotterySlug, window = 50) {
+    const snapshot = await this.prisma.analysisSnapshot.findFirst({
+      where: { lottery: { slug }, status: "PUBLISHED" },
+      orderBy: [{ cutoffContest: "desc" }, { createdAt: "desc" }],
+    });
+    if (!snapshot) return null;
+    const metadata = snapshot.metadata as {
+      formula_version?: string;
+      windows?: Record<
+        string,
+        {
+          n: number;
+          numbers: Array<{
+            number: number;
+            count: number;
+            frequency: number;
+            expected: number;
+            ema: number;
+            gap: number | null;
+          }>;
+          sum?: { mean: number | null; p05: number | null; p95: number | null };
+          odd?: { mean: number | null };
+        }
+      >;
+    };
+    const available = Object.keys(metadata.windows ?? {}).map(Number);
+    const selectedWindow = available.includes(window)
+      ? window
+      : available.sort((a, b) => Math.abs(a - window) - Math.abs(b - window))[0];
+    return {
+      lottery: slug,
+      cutoffContest: snapshot.cutoffContest,
+      formulaVersion: metadata.formula_version,
+      requestedWindow: window,
+      selectedWindow,
+      data: selectedWindow
+        ? metadata.windows?.[String(selectedWindow)]
+        : null,
+    };
+  }
+
+  async generateForUser(
+    userId: string,
+    input: {
+      lottery: LotterySlug;
+      strategy:
+        | "uniform"
+        | "recent-frequency"
+        | "historical-profile"
+        | "diversified";
+      count: number;
+      window?: number;
+      alpha?: number;
+      tau?: number;
+      fixed?: number[];
+      excluded?: number[];
+      maxOverlap?: number;
+      baseStrategy?: "uniform" | "recent-frequency" | "historical-profile";
+      allowStaleSimulation?: boolean;
+      seed?: number;
+      requestKey?: string;
+    },
+  ) {
+    const rules = RULES[input.lottery];
+    if (
+      !["uniform", "recent-frequency", "historical-profile", "diversified"].includes(
+        input.strategy,
+      )
+    ) {
+      throw new BadRequestException("Estratégia inválida");
+    }
+    if (!Number.isInteger(input.count) || input.count < 1 || input.count > 20) {
+      throw new BadRequestException("Quantidade deve estar entre 1 e 20");
+    }
+    const window = input.window ?? 50;
+    const alpha = input.alpha ?? 10;
+    const tau = input.tau ?? 1;
+    if (
+      !Number.isInteger(window) ||
+      window < 1 ||
+      window > 500 ||
+      !Number.isFinite(alpha) ||
+      alpha <= 0 ||
+      alpha > 100 ||
+      !Number.isFinite(tau) ||
+      tau < 0 ||
+      tau > 3 ||
+      (input.seed !== undefined &&
+        (!Number.isInteger(input.seed) ||
+          input.seed < 0 ||
+          input.seed > 2_147_483_647))
+    ) {
+      throw new BadRequestException("Parâmetros da estratégia inválidos");
+    }
+    const fixed = input.fixed ?? [];
+    const excluded = input.excluded ?? [];
+    if (
+      new Set(fixed).size !== fixed.length ||
+      new Set(excluded).size !== excluded.length ||
+      fixed.some((number) => excluded.includes(number)) ||
+      [...fixed, ...excluded].some(
+        (number) =>
+          !Number.isInteger(number) ||
+          number < 1 ||
+          number > rules.universe,
+      ) ||
+      fixed.length > rules.simplePick ||
+      rules.universe - excluded.length < rules.simplePick
+    ) {
+      throw new BadRequestException("Restrições de dezenas são inviáveis");
+    }
+    const dataset = await this.dataset(input.lottery);
+    const lottery = await this.prisma.lottery.upsert({
+      where: { slug: input.lottery },
+      update: {},
+      create: { slug: input.lottery, name: input.lottery },
+    });
+    const historical =
+      input.strategy !== "uniform" &&
+      !(
+        input.strategy === "diversified" &&
+        input.baseStrategy === "uniform"
+      );
+    const minimum =
+      input.strategy === "historical-profile" ||
+      (input.strategy === "diversified" &&
+        input.baseStrategy === "historical-profile")
+        ? 25
+        : historical
+          ? 10
+          : 0;
+    if (dataset.draws.length < minimum) {
+      throw new BadRequestException(
+        `Histórico insuficiente: disponível ${dataset.draws.length}, necessário ${minimum}`,
+      );
+    }
+    const stale = lottery.freshnessStatus !== "VERIFIED";
+    if (historical && stale && !input.allowStaleSimulation) {
+      throw new BadRequestException(
+        "A base não está verificada como atual; habilite simulação com corte explícito",
+      );
+    }
+    if (input.requestKey) {
+      const existing = await this.prisma.withUser(userId, (tx) =>
+        tx.suggestionBatch.findUnique({
+          where: {
+            userId_requestKey: {
+              userId,
+              requestKey: input.requestKey!,
+            },
+          },
+          include: {
+            games: true,
+            snapshot: true,
+            strategyVersion: { include: { strategy: true } },
+          },
+        }),
+      );
+      if (existing) return existing;
+    }
+    await this.consumeGenerationQuota(userId, input.count);
+    const seed = input.seed ?? randomInt(1, 2_147_483_647);
+    const generation = (await this.analytics("/v1/generate", {
+      dataset,
+      strategy: input.strategy,
+      count: input.count,
+      pick_count: rules.simplePick,
+      seed,
+      fixed,
+      excluded,
+      max_overlap: input.maxOverlap,
+      window,
+      alpha,
+      tau,
+      reference_size: 2000,
+      base_strategy: input.baseStrategy ?? "recent-frequency",
+    })) as AnalyticsGeneration;
+    let snapshotId: string;
+    if (dataset.draws.length >= 2) {
+      snapshotId = await this.recalculateAnalysisOnly(input.lottery);
+    } else {
+      const snapshot = await this.prisma.analysisSnapshot.upsert({
+        where: {
+          lotteryId_cutoffContest_datasetHash_version: {
+            lotteryId: lottery.id,
+            cutoffContest: dataset.contest_numbers.at(-1) ?? 0,
+            datasetHash: dataset.dataset_hash,
+            version: "baseline-empty-v1",
+          },
+        },
+        update: {},
+        create: {
+          lotteryId: lottery.id,
+          cutoffContest: dataset.contest_numbers.at(-1) ?? 0,
+          datasetHash: dataset.dataset_hash,
+          version: "baseline-empty-v1",
+          status: "PUBLISHED",
+          windows: [],
+          metadata: {
+            notice: "Baseline uniforme sem análise histórica.",
+          },
+          publishedAt: new Date(),
+        },
+      });
+      snapshotId = snapshot.id;
+    }
+    const monthSeed =
+      input.lottery === "dia-de-sorte"
+        ? createHash("sha256")
+            .update(`${generation.seed}:lucky-month-v1`)
+            .digest("hex")
+        : null;
+    const batch = await this.prisma.withUser(userId, async (tx) => {
+      const strategy = await tx.strategy.upsert({
+        where: {
+          lotteryId_code: {
+            lotteryId: lottery.id,
+            code: generation.strategy,
+          },
+        },
+        update: {},
+        create: {
+          lotteryId: lottery.id,
+          code: generation.strategy,
+          name:
+            input.strategy === "uniform"
+              ? "Aleatório — sem análise histórica"
+              : input.strategy === "recent-frequency"
+                ? "Frequência histórica recente"
+                : input.strategy === "historical-profile"
+                  ? "Perfil histórico"
+                  : "Carteira diversificada",
+        },
+      });
+      const strategyVersion = await tx.strategyVersion.upsert({
+        where: {
+          strategyId_version: {
+            strategyId: strategy.id,
+            version: generation.strategy_version,
+          },
+        },
+        update: {},
+        create: {
+          strategyId: strategy.id,
+          version: generation.strategy_version,
+          parameters: {
+            window,
+            alpha,
+            tau,
+            baseStrategy: input.baseStrategy ?? null,
+            ...(generation.parameters ?? {}),
+          },
+          status: "ACTIVE",
+        },
+      });
+      const previous = await tx.suggestionBatch.findFirst({
+        where: { userId, snapshot: { lotteryId: lottery.id } },
+        orderBy: { createdAt: "desc" },
+      });
+      return tx.suggestionBatch.create({
+        data: {
+          snapshotId,
+          strategyVersionId: strategyVersion.id,
+          userId,
+          targetContest:
+            lottery.nextContestNumber ??
+            (dataset.contest_numbers.at(-1) ?? 0) + 1,
+          seed: String(generation.seed),
+          prng: generation.prng,
+          constraints: {
+            fixed,
+            excluded,
+            maxOverlap: input.maxOverlap ?? null,
+            simulation: historical && stale,
+            sample: generation.sample,
+            ...(monthSeed
+              ? {
+                  luckyMonth: {
+                    strategy: "uniform-random-reference",
+                    seed: monthSeed,
+                    prng: "sha256-counter-v1",
+                  },
+                }
+              : {}),
+          },
+          datasetHash: dataset.dataset_hash,
+          scoreVersion: generation.score_version ?? "none",
+          status: historical && stale ? "SIMULATION" : "PUBLISHED",
+          requestKey: input.requestKey,
+          previousBatchId: previous?.id,
+          publishedAt: new Date(),
+          games: {
+            create: generation.games.map((game, index) => ({
+              numbers: game.numbers,
+              luckyMonth: monthSeed
+                ? generateLuckyMonth(monthSeed, index)
+                : null,
+              score: game.score,
+              scoreBreakdown: {
+                ...game.explanation,
+                ...(monthSeed
+                  ? {
+                      lucky_month: {
+                        value: generateLuckyMonth(monthSeed, index),
+                        strategy: "uniform-random-reference",
+                        seed: monthSeed,
+                        notice:
+                          "Referência uniforme 1/12; independente das dezenas.",
+                      },
+                    }
+                  : {}),
+              } as Prisma.InputJsonValue,
+            })),
+          },
+        },
+        include: {
+          games: true,
+          snapshot: true,
+          strategyVersion: { include: { strategy: true } },
+        },
+      });
+    });
+    return batch;
+  }
+
   async latest(slug: LotterySlug) {
     const lottery = await this.prisma.lottery.findUnique({ where: { slug } });
     if (!lottery) throw new NotFoundException("Modalidade sem dados");
     return this.prisma.suggestionBatch.findFirst({
       where: { snapshot: { lotteryId: lottery.id }, userId: null },
       orderBy: { createdAt: "desc" },
-      include: { games: true, snapshot: true, strategyVersion: true },
+      include: {
+        games: true,
+        snapshot: true,
+        strategyVersion: { include: { strategy: true } },
+      },
     });
   }
 
   async saveGame(userId: string, suggestedGameId: string, name?: string) {
-    const suggestion = await this.prisma.suggestedGame.findUnique({
-      where: { id: suggestedGameId },
-      include: { batch: { include: { snapshot: { include: { lottery: true } } } } },
-    });
-    if (!suggestion) throw new NotFoundException("Sugestão não encontrada");
     return this.prisma.withUser(userId, (tx) =>
-      tx.savedGame.create({
-        data: {
-          userId,
-          suggestedGameId,
-          lotterySlug: suggestion.batch.snapshot.lottery.slug,
-          numbers: suggestion.numbers,
-          luckyMonth: suggestion.luckyMonth,
-          name: name ?? "Jogo salvo",
-          tags: [],
-        },
-      }),
+      tx.suggestedGame
+        .findUnique({
+          where: { id: suggestedGameId },
+          include: {
+            batch: {
+              include: { snapshot: { include: { lottery: true } } },
+            },
+          },
+        })
+        .then((suggestion) => {
+          if (!suggestion) {
+            throw new NotFoundException("Sugestão não encontrada");
+          }
+          return tx.savedGame.create({
+            data: {
+              userId,
+              suggestedGameId,
+              lotterySlug: suggestion.batch.snapshot.lottery.slug,
+              numbers: suggestion.numbers,
+              luckyMonth: suggestion.luckyMonth,
+              name: name ?? "Jogo salvo",
+              tags: [],
+            },
+          });
+        }),
     );
   }
 
@@ -697,9 +1231,52 @@ export class LotteryFlowService {
       tx.savedGame.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },
-        include: { evaluations: { include: { drawRevision: true } } },
+        include: {
+          tracking: true,
+          evaluations: {
+            include: { drawRevision: { include: { draw: true } } },
+          },
+        },
       }),
     );
+  }
+
+  async archiveGame(userId: string, gameId: string, archived: boolean) {
+    return this.prisma.withUser(userId, async (tx) => {
+      const result = await tx.savedGame.updateMany({
+        where: { id: gameId, userId },
+        data: { archivedAt: archived ? new Date() : null },
+      });
+      if (result.count !== 1) {
+        throw new NotFoundException("Jogo não encontrado");
+      }
+      return tx.savedGame.findUniqueOrThrow({ where: { id: gameId } });
+    });
+  }
+
+  async trackGame(
+    userId: string,
+    gameId: string,
+    startContest: number,
+    endContest?: number,
+  ) {
+    if (
+      !Number.isInteger(startContest) ||
+      startContest < 1 ||
+      (endContest !== undefined &&
+        (!Number.isInteger(endContest) || endContest < startContest))
+    ) {
+      throw new BadRequestException("Intervalo de acompanhamento inválido");
+    }
+    return this.prisma.withUser(userId, async (tx) => {
+      const game = await tx.savedGame.findFirst({
+        where: { id: gameId, userId },
+      });
+      if (!game) throw new NotFoundException("Jogo não encontrado");
+      return tx.trackingSubscription.create({
+        data: { savedGameId: gameId, startContest, endContest },
+      });
+    });
   }
 
   async evaluateContest(slug: LotterySlug, contestNumber: number) {
@@ -764,6 +1341,45 @@ export class LotteryFlowService {
     }
   }
 
+  private async consumeGenerationQuota(userId: string, amount: number) {
+    const period = new Date().toISOString().slice(0, 10);
+    const limit = Math.max(
+      1,
+      Number(process.env.DEFAULT_DAILY_GAME_LIMIT ?? 100),
+    );
+    await this.prisma.withUser(userId, async (tx) => {
+      const counter = await tx.usageCounter.upsert({
+        where: {
+          userId_key_period: {
+            userId,
+            key: "generated-games",
+            period,
+          },
+        },
+        update: { limit },
+        create: {
+          userId,
+          key: "generated-games",
+          period,
+          used: 0,
+          limit,
+        },
+      });
+      const consumed = await tx.usageCounter.updateMany({
+        where: {
+          id: counter.id,
+          used: { lte: limit - amount },
+        },
+        data: { used: { increment: amount } },
+      });
+      if (consumed.count !== 1) {
+        throw new ForbiddenException(
+          `Limite diário de ${limit} jogos atingido`,
+        );
+      }
+    });
+  }
+
   private async recordSourceFetch(
     slug: LotterySlug,
     fetched: CaixaFetchResult,
@@ -786,17 +1402,80 @@ export class LotteryFlowService {
     contest: number | undefined,
     error: unknown,
   ) {
-    await this.prisma.sourceFetch.create({
+    await this.prisma.$transaction([
+      this.prisma.sourceFetch.create({
+        data: {
+          lotterySlug: slug,
+          url: this.caixa.endpointUrl(slug, contest),
+          fetchedAt: new Date(),
+          statusCode:
+            typeof (error as { statusCode?: unknown })?.statusCode === "number"
+              ? (error as { statusCode: number }).statusCode
+              : null,
+          parserVersion: "caixa-portal-servicebus-v2",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      }),
+      this.prisma.lottery.updateMany({
+        where: { slug },
+        data: { freshnessStatus: "VERIFICATION_UNAVAILABLE" },
+      }),
+    ]);
+  }
+
+  private async updateCoverage(slug: LotterySlug) {
+    const lottery = await this.prisma.lottery.findUniqueOrThrow({
+      where: { slug },
+    });
+    const draws = await this.prisma.draw.findMany({
+      where: {
+        lotteryId: lottery.id,
+        canonicalRevisionId: { not: null },
+      },
+      orderBy: { contestNumber: "asc" },
+      include: { revisions: true },
+    });
+    const gaps: Array<{ after: number; before: number }> = [];
+    for (let index = 1; index < draws.length; index++) {
+      if (draws[index].contestNumber !== draws[index - 1].contestNumber + 1) {
+        gaps.push({
+          after: draws[index - 1].contestNumber,
+          before: draws[index].contestNumber,
+        });
+      }
+    }
+    const firstContest = draws[0]?.contestNumber ?? null;
+    const lastContest = draws.at(-1)?.contestNumber ?? null;
+    const canonical = draws.at(-1)?.revisions.find(
+      (revision) => revision.id === draws.at(-1)?.canonicalRevisionId,
+    );
+    const complete =
+      firstContest === 1 &&
+      gaps.length === 0 &&
+      lottery.sourceLatestContest !== null &&
+      lottery.sourceLatestContest === lastContest;
+    const freshnessStatus =
+      lastContest === null
+        ? "NO_RESULTS"
+        : lottery.sourceLatestContest === lastContest &&
+            canonical?.sourceVerifiedAt
+          ? "VERIFIED"
+          : lottery.sourceLatestContest &&
+              lastContest < lottery.sourceLatestContest
+            ? "BEHIND_SOURCE"
+            : "UNVERIFIED";
+    await this.prisma.lottery.update({
+      where: { id: lottery.id },
       data: {
-        lotterySlug: slug,
-        url: this.caixa.endpointUrl(slug, contest),
-        fetchedAt: new Date(),
-        statusCode:
-          typeof (error as { statusCode?: unknown })?.statusCode === "number"
-            ? (error as { statusCode: number }).statusCode
-            : null,
-        parserVersion: "caixa-portal-servicebus-v2",
-        error: error instanceof Error ? error.message : String(error),
+        freshnessStatus,
+        dataCoverage: {
+          confirmedDraws: draws.length,
+          firstContest,
+          lastContest,
+          sourceLatestContest: lottery.sourceLatestContest,
+          gaps,
+          complete,
+        },
       },
     });
   }
@@ -809,7 +1488,9 @@ export class LotteryFlowService {
     if (
       options.prizes === undefined &&
       options.nextPublication === undefined &&
-      options.sourceLatestContest === undefined
+      options.sourceLatestContest === undefined &&
+      options.sourceVerifiedAt === undefined &&
+      options.accumulated === undefined
     ) {
       return;
     }
@@ -829,6 +1510,18 @@ export class LotteryFlowService {
         await tx.drawRevision.update({
           where: { id: revisionId },
           data: { prizeState: PrizeState.CONFIRMED },
+        });
+      }
+      if (
+        options.sourceVerifiedAt !== undefined ||
+        options.accumulated !== undefined
+      ) {
+        await tx.drawRevision.update({
+          where: { id: revisionId },
+          data: {
+            sourceVerifiedAt: options.sourceVerifiedAt,
+            accumulated: options.accumulated,
+          },
         });
       }
       if (options.nextPublication) {

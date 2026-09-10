@@ -46,6 +46,10 @@ model User {
   passwordHash    String
   role            Role             @default(USER)
   emailVerifiedAt DateTime?
+  suspendedAt     DateTime?
+  adminMfaSecretEncrypted String?
+  adminMfaEnabledAt DateTime?
+  adminMfaRecoveryHashes String[]           @default([])
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   sessions        Session[]
@@ -62,6 +66,7 @@ model Session {
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
+  adminMfaVerifiedAt DateTime?
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -165,6 +170,8 @@ model Lottery {
   nextDrawDate       DateTime?
   estimatedPrizeCents BigInt?
   sourceUpdatedAt    DateTime?
+  dataCoverage       Json?
+  freshnessStatus    String               @default("NO_RESULTS")
   rules      LotteryRuleVersion[]
   draws      Draw[]
   snapshots  AnalysisSnapshot[]
@@ -218,6 +225,8 @@ model DrawRevision {
   rawPayload    Json
   payloadHash   String
   parserVersion String
+  sourceVerifiedAt DateTime?
+  accumulated   Boolean?
   supersededAt  DateTime?
   createdAt     DateTime          @default(now())
   draw          Draw              @relation(fields: [drawId], references: [id])
@@ -261,6 +270,10 @@ model ImportRun {
   status          JobStatus
   recordsRead     Int       @default(0)
   recordsAccepted Int       @default(0)
+  sourceFileName  String?
+  sourceFileHash  String?
+  actorUserId     String?
+  preview         Json?
   startedAt       DateTime  @default(now())
   finishedAt      DateTime?
 }
@@ -380,6 +393,7 @@ model SuggestionBatch {
   datasetHash       String
   scoreVersion      String
   status            String
+  requestKey        String?
   previousBatchId   String?
   createdAt         DateTime         @default(now())
   publishedAt       DateTime?
@@ -388,6 +402,7 @@ model SuggestionBatch {
   games             SuggestedGame[]
 
   @@index([userId, createdAt])
+  @@unique([userId, requestKey])
 }
 
 model SuggestedGame {
@@ -395,7 +410,7 @@ model SuggestedGame {
   batchId            String
   numbers            Int[]
   luckyMonth         Int?
-  score              Float
+  score              Float?
   scoreBreakdown     Json
   estimatedCostCents Int?
   batch              SuggestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)

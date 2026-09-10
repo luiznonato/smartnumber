@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Role } from "@prisma/client";
 import { RULES, type LotterySlug } from "@atlas/contracts";
 import {
   afterAll,
@@ -10,10 +10,12 @@ import {
   vi,
 } from "vitest";
 import { AuthService } from "./auth.service.js";
+import { hashPassword } from "./auth.js";
 import { PrismaService } from "./database.js";
 import { CaixaServiceBusProvider } from "./ingestion.js";
 import { LotteryFlowService } from "./lottery-flow.service.js";
 import { OFFICIAL_LIFECYCLE_FIXTURES } from "./official-lifecycle-fixtures.js";
+import * as OTPAuth from "otpauth";
 
 const enabled =
   process.env.RUN_DB_INTEGRATION === "1" &&
@@ -38,6 +40,10 @@ suite("persistent official-result lifecycle", () => {
     await admin.$connect();
     await prisma.onModuleInit();
     process.env.CAIXA_ENABLED = "true";
+    process.env.SESSION_SECRET =
+      "integration-session-secret-with-32-characters";
+    process.env.ADMIN_MFA_ENCRYPTION_KEY =
+      "integration-mfa-encryption-key-32-characters";
   }, 30_000);
 
   beforeEach(async () => {
@@ -60,6 +66,8 @@ suite("persistent official-result lifecycle", () => {
     await prisma.onModuleDestroy();
     await admin.$disconnect();
     delete process.env.CAIXA_ENABLED;
+    delete process.env.SESSION_SECRET;
+    delete process.env.ADMIN_MFA_ENCRYPTION_KEY;
   });
 
   it.each(Object.keys(OFFICIAL_LIFECYCLE_FIXTURES) as LotterySlug[])(
@@ -81,8 +89,13 @@ suite("persistent official-result lifecycle", () => {
       const secondImport = await flow.importConfirmed(normalized[1], fixtures[1]);
       const second = await flow.processRevision(secondImport.revisionId);
       expect(second.snapshotId).toBeTruthy();
-      const originalBatch = await flow.latest(lottery);
-      if (!originalBatch) throw new Error("Lote inicial não foi publicado");
+      expect(second.analysisStatus).toBe("WAITING_FOR_STRATEGY_SAMPLE");
+      const originalBatch = await flow.generateForUser(subscriber.user.id, {
+        lottery,
+        strategy: "uniform",
+        count: 5,
+        seed: 1234,
+      });
       expect(originalBatch.games).toHaveLength(5);
       expect(originalBatch.games[0].numbers).toHaveLength(
         RULES[lottery].simplePick,
@@ -112,13 +125,21 @@ suite("persistent official-result lifecycle", () => {
       const thirdImport = await flow.importConfirmed(normalized[2], fixtures[2]);
       const third = await flow.processRevision(thirdImport.revisionId);
       expect(third.snapshotId).toBeTruthy();
-      const successor = await flow.latest(lottery);
-      if (!successor) throw new Error("Lote sucessor não foi publicado");
+      const successor = await flow.generateForUser(subscriber.user.id, {
+        lottery,
+        strategy: "uniform",
+        count: 5,
+        seed: 5678,
+      });
       expect(successor.id).not.toBe(originalBatch.id);
       expect(successor.previousBatchId).toBe(originalBatch.id);
       const replay = await flow.processRevision(thirdImport.revisionId);
       expect(replay.duplicate).toBe(true);
-      expect((await flow.latest(lottery))?.id).toBe(successor.id);
+      const batches = await admin.suggestionBatch.findMany({
+        where: { userId: subscriber.user.id },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(batches[0].id).toBe(successor.id);
 
       const games = await flow.userGames(subscriber.user.id);
       const saved = games.find((game) => game.id === original.id);
@@ -209,5 +230,53 @@ suite("persistent official-result lifecycle", () => {
     );
     expect(canonical?.prizeState).toBe("CONFIRMED");
     expect(canonical?.prizeTiers).toHaveLength(2);
+    const latestDraw = await flow.latestDraw("dia-de-sorte");
+    expect(latestDraw).toMatchObject({
+      state: "VERIFIED",
+      sourceLatestContest: 3,
+      draw: {
+        contestNumber: 3,
+        luckyMonth: 4,
+        prizeState: "CONFIRMED",
+      },
+      nextContest: { contestNumber: 4, drawDate: "2018-05-26" },
+    });
+  });
+
+  it("requires MFA before issuing an administrative session", async () => {
+    await admin.user.create({
+      data: {
+        email: "admin@integration.test",
+        passwordHash: await hashPassword("integration-admin-password"),
+        role: Role.ADMIN,
+      },
+    });
+    const challenge = await auth.beginAdminLogin(
+      "admin@integration.test",
+      "integration-admin-password",
+    );
+    expect(challenge.setupRequired).toBe(true);
+    expect(challenge.setup?.secret).toBeTruthy();
+    const totp = new OTPAuth.TOTP({
+      issuer: "Atlas Loto",
+      label: "admin@integration.test",
+      secret: OTPAuth.Secret.fromBase32(challenge.setup!.secret),
+    });
+    const completed = await auth.completeAdminMfa(
+      challenge.challenge,
+      totp.generate(),
+      true,
+    );
+    expect(completed.recoveryCodes).toHaveLength(8);
+    const session = await admin.session.findFirstOrThrow({
+      where: { userId: completed.user.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(session.adminMfaVerifiedAt).not.toBeNull();
+    const storedAdmin = await admin.user.findUniqueOrThrow({
+      where: { email: "admin@integration.test" },
+    });
+    expect(storedAdmin.adminMfaEnabledAt).not.toBeNull();
+    expect(storedAdmin.adminMfaRecoveryHashes).toHaveLength(8);
   });
 });

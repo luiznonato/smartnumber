@@ -65,9 +65,34 @@ export class AdminAuthController {
   @Post("login")
   async login(
     @Body() body: Credentials,
+  ) {
+    return this.auth.beginAdminLogin(body.email, body.password);
+  }
+
+  @Post("mfa/setup")
+  async setupMfa(
+    @Body() body: { challenge: string; code: string },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
-    const result = await this.auth.login(body.email, body.password, Role.ADMIN);
+    const result = await this.auth.completeAdminMfa(
+      body.challenge,
+      body.code,
+      true,
+    );
+    setSessionCookie(reply, result);
+    return { user: result.user, recoveryCodes: result.recoveryCodes };
+  }
+
+  @Post("mfa/verify")
+  async verifyMfa(
+    @Body() body: { challenge: string; code: string },
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const result = await this.auth.completeAdminMfa(
+      body.challenge,
+      body.code,
+      false,
+    );
     setSessionCookie(reply, result);
     return { user: result.user };
   }

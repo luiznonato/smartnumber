@@ -14,7 +14,7 @@ def do_analyze(r:AnalyzeRequest):verify(r.dataset);return analyze(r.dataset.draw
 @app.post("/v1/generate")
 def do_generate(r:GenerateRequest):
  verify(r.dataset)
- try:return generate(r.dataset.draws,r.dataset.universe,r.pick_count,r.count,r.seed,r.strategy,r.fixed,r.excluded,r.max_overlap)
+ try:return generate(r.dataset.draws,r.dataset.universe,r.pick_count,r.count,r.seed,r.strategy,r.fixed,r.excluded,r.max_overlap,r.window,r.alpha,r.tau,r.reference_size,r.base_strategy)
  except ValueError as e:raise HTTPException(422,str(e)) from e
 @app.post("/v1/backtest")
 def do_backtest(r:BacktestRequest):verify(r.dataset);return backtest(r.dataset.contest_numbers,r.dataset.draws,r.dataset.universe,r.dataset.drawn_count,r.pick_count,r.tickets_per_contest,r.seeds,r.min_training,r.strategy)

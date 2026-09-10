@@ -20,6 +20,7 @@ export type CaixaFetchResult = {
   url: string;
   fetchedAt: Date;
   payloadHash: string;
+  accumulated: boolean | null;
   prizes: NormalizedPrizeTier[] | null;
   nextContest: {
     contestNumber: number | null;
@@ -199,6 +200,8 @@ export class CaixaServiceBusProvider implements LotteryResultsProvider {
       url,
       fetchedAt,
       payloadHash: payloadHash(value),
+      accumulated:
+        typeof value.acumulado === "boolean" ? value.acumulado : null,
       prizes: normalizePrizes(value.listaRateioPremio),
       nextContest: {
         contestNumber:

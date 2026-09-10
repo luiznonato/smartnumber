@@ -115,8 +115,47 @@ const timer = setInterval(
 );
 await dispatchOutbox();
 
+let syncing = false;
+async function synchronizeLatestDraws() {
+  if (process.env.CAIXA_ENABLED !== "true" || syncing) return;
+  syncing = true;
+  try {
+    for (const lottery of ["mega-sena", "lotofacil", "dia-de-sorte"]) {
+      const response = await fetch(
+        `${apiUrl}/api/internal/draw-events/sync/${lottery}`,
+        {
+          method: "POST",
+          headers: { "x-atlas-worker-secret": internalSecret as string },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      if (!response.ok) {
+        console.error(
+          JSON.stringify({
+            service: "worker",
+            event: "caixa_sync_failed",
+            lottery,
+            status: response.status,
+          }),
+        );
+      }
+    }
+  } finally {
+    syncing = false;
+  }
+}
+const syncTimer = setInterval(
+  () => void synchronizeLatestDraws(),
+  Math.max(
+    Number(process.env.CAIXA_SYNC_INTERVAL_MS ?? 900_000),
+    300_000,
+  ),
+);
+void synchronizeLatestDraws();
+
 async function shutdown() {
   clearInterval(timer);
+  clearInterval(syncTimer);
   await worker.close();
   await events.close();
   await dead.close();

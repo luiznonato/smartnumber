@@ -35,3 +35,16 @@ eventos pendentes.
 Próximo passo preciso: ampliar as políticas e testes RLS para entidades privadas
 filhas (`GameRevision`, `TrackingSubscription`, assinatura e quotas) e implementar
 gerenciamento de verificação de e-mail/recuperação de senha.
+
+## Correção funcional e visual em andamento
+
+Auditoria atual e plano registrados em `CURRENT_GENERATION_AUDIT.md` e
+`CORRECTION_PLAN.md`. Implementados nesta etapa: endpoint do último resultado
+canônico com freshness/cobertura; estratégias uniform-v2, recent-frequency-v2,
+historical-profile-v1 e diversified-v1; geração autenticada/persistida com quota
+atômica; arquivamento e acompanhamento; importação administrativa com
+prévia/confirmação; MFA TOTP administrativo; scheduler de coleta no worker; e
+novo shell branco conectado para Início, Análises, Gerar e Meus jogos.
+
+Ainda falta concluir o teste integrado da nova migration, a inspeção visual,
+backup/restauração e a publicação do backend na VPS.
