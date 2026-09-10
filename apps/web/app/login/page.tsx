@@ -10,6 +10,9 @@ export default function LoginPage() {
       <p>
         Ainda não possui conta? <Link href="/cadastro">Cadastre-se</Link>.
       </p>
+      <p>
+        <Link href="/recuperar-senha">Esqueci minha senha</Link>
+      </p>
     </>
   );
 }
