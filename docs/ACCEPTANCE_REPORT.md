@@ -28,6 +28,17 @@ um lote sucessor vinculado. O teste do Dia de Sorte também verifica geração d
 mês com seed separada e sua conferência independente. Resultado executado:
 1 arquivo, 3 testes aprovados.
 
+Os comandos CLI persistentes deixaram de ser placeholders. Foram executados
+contra o banco de teste: reconferência do concurso 3 do Dia de Sorte, novo
+snapshot/lote da Lotofácil e backtest walk-forward da Mega-Sena com duas seeds.
+Esse backtest usa apenas três concursos para validar o encadeamento técnico; não
+tem amostra suficiente para qualquer conclusão de desempenho.
+
+O pós-importação foi retirado da conexão HTTP administrativa. Em teste integrado,
+API e worker foram iniciados contra PostgreSQL/Redis isolados; o worker consumiu
+os nove eventos `draw.confirmed` pendentes em ordem, obteve respostas idempotentes
+do endpoint interno e reduziu a zero a contagem de eventos sem `publishedAt`.
+
 ## Implementado sem verificação externa
 
 As imagens e os serviços de banco foram exercitados localmente. A restauração de backup e o Compose completo com proxy não foram executados.

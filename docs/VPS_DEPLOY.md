@@ -12,7 +12,9 @@ preserva esses arquivos e mantém o Nginx/SSL do painel:
 1. Instale Docker no host e copie o repositório para um diretório fora de
    `public_html`.
 2. Configure `.env` com duas URLs: a migration usa a role proprietária; a API
-   conecta com a role de aplicação sem `BYPASSRLS`.
+   e o worker conectam com a role de aplicação sem `BYPASSRLS`. Defina
+   `WORKER_INTERNAL_SECRET` com valor aleatório de pelo menos 32 caracteres,
+   compartilhado apenas entre API e worker.
 3. Execute migrations como job único.
 4. Suba somente `postgres redis analytics api worker`. A API publica apenas em
    `127.0.0.1:3001`.

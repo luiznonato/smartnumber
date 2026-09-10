@@ -33,7 +33,18 @@ npm run cli -- backtest lottery=mega-sena
 npm run cli -- evaluate-games lottery=mega-sena contest=0
 ```
 
-Os cinco últimos comandos falham de modo seguro até `DATABASE_URL` e arquivo/fonte oficial estarem configurados; não criam dados fictícios. Essa limitação está registrada em `docs/STATUS.md`.
+Os comandos persistentes exigem `DATABASE_URL` e o serviço analítico. O importador
+aceita um objeto ou array com payloads brutos da interface CAIXA, ordena por
+concurso, registra checkpoint em `ImportRun` e publica a análise somente ao final.
+Uma execução interrompida pode ser retomada com o mesmo arquivo:
+
+```bash
+npm run cli -- import-history lottery=mega-sena \
+  file=/caminho/oficial.json resume=uuid-do-import-run
+```
+
+`sync-result` falha de modo seguro quando a origem CAIXA bloqueia o servidor.
+Nenhum desses comandos cria resultados fictícios.
 
 Endpoints integrados disponíveis após subir API, analytics e banco:
 

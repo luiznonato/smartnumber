@@ -61,10 +61,12 @@ suite("persistent official-result lifecycle", () => {
         "integration-password",
       );
 
-      const first = await flow.importConfirmed(normalized[0], fixtures[0]);
+      const firstImport = await flow.importConfirmed(normalized[0], fixtures[0]);
+      const first = await flow.processRevision(firstImport.revisionId);
       expect(first.analysisStatus).toBe("WAITING_FOR_MINIMUM_HISTORY");
 
-      const second = await flow.importConfirmed(normalized[1], fixtures[1]);
+      const secondImport = await flow.importConfirmed(normalized[1], fixtures[1]);
+      const second = await flow.processRevision(secondImport.revisionId);
       expect(second.snapshotId).toBeTruthy();
       const originalBatch = await flow.latest(lottery);
       if (!originalBatch) throw new Error("Lote inicial não foi publicado");
@@ -94,12 +96,16 @@ suite("persistent official-result lifecycle", () => {
       const originalNumbers = [...original.numbers];
       const originalMonth = original.luckyMonth;
 
-      const third = await flow.importConfirmed(normalized[2], fixtures[2]);
+      const thirdImport = await flow.importConfirmed(normalized[2], fixtures[2]);
+      const third = await flow.processRevision(thirdImport.revisionId);
       expect(third.snapshotId).toBeTruthy();
       const successor = await flow.latest(lottery);
       if (!successor) throw new Error("Lote sucessor não foi publicado");
       expect(successor.id).not.toBe(originalBatch.id);
       expect(successor.previousBatchId).toBe(originalBatch.id);
+      const replay = await flow.processRevision(thirdImport.revisionId);
+      expect(replay.duplicate).toBe(true);
+      expect((await flow.latest(lottery))?.id).toBe(successor.id);
 
       const games = await flow.userGames(subscriber.user.id);
       const saved = games.find((game) => game.id === original.id);

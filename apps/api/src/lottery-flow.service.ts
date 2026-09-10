@@ -21,6 +21,15 @@ type AnalyticsGame = {
   explanation: Record<string, unknown>;
 };
 
+type ProcessRevisionResult = {
+  revisionId: string;
+  duplicate: boolean;
+  analysisStatus?: string;
+  gaps?: Array<{ after: number; before: number }>;
+  snapshotId?: string;
+  suggestionBatchId?: string;
+};
+
 export function generateLuckyMonth(monthSeed: string, index: number): number {
   const digest = createHash("sha256")
     .update(`${monthSeed}:${index}`)
@@ -33,7 +42,11 @@ export class LotteryFlowService {
   private readonly caixa = new CaixaServiceBusProvider();
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async importConfirmed(raw: unknown, sourcePayload: unknown = raw) {
+  async importConfirmed(
+    raw: unknown,
+    sourcePayload: unknown = raw,
+    options: { publishAnalysis?: boolean } = {},
+  ) {
     const input = drawSchema.parse(raw);
     const numbers = [...input.numbers].sort((a, b) => a - b);
     const hash = createHash("sha256")
@@ -49,13 +62,11 @@ export class LotteryFlowService {
       },
     });
     if (existing) {
-      await this.evaluateGames(
-        input.lottery,
-        existing.id,
-        existing.numbers,
-        existing.luckyMonth,
-      );
-      return { revisionId: existing.id, duplicate: true, downstreamReplayed: true };
+      return {
+        revisionId: existing.id,
+        duplicate: true,
+        analysisStatus: "ALREADY_QUEUED_OR_PROCESSED",
+      };
     }
 
     const revision = await this.prisma.$transaction(async (tx) => {
@@ -118,12 +129,79 @@ export class LotteryFlowService {
             lottery: input.lottery,
             contestNumber: input.contestNumber,
             revisionId: created.id,
+            publishAnalysis: options.publishAnalysis !== false,
           },
         },
       });
       return created;
     });
-    await this.evaluateGames(input.lottery, revision.id, numbers, input.luckyMonth);
+    return {
+      revisionId: revision.id,
+      duplicate: false,
+      analysisStatus: "QUEUED",
+    };
+  }
+
+  async processRevision(
+    revisionId: string,
+    publishAnalysis = true,
+  ): Promise<ProcessRevisionResult> {
+    const revision = await this.prisma.drawRevision.findUnique({
+      where: { id: revisionId },
+      include: { draw: { include: { lottery: true } } },
+    });
+    if (!revision || revision.confirmation !== ConfirmationState.CONFIRMED) {
+      throw new NotFoundException("Revisão confirmada não encontrada");
+    }
+    const jobKey = `draw-revision:${revisionId}`;
+    const job = await this.prisma.jobRun.upsert({
+      where: {
+        queue_jobKey_version: {
+          queue: "draw-events",
+          jobKey,
+          version: "pipeline-v1",
+        },
+      },
+      update: {},
+      create: {
+        queue: "draw-events",
+        jobKey,
+        version: "pipeline-v1",
+        status: "PENDING",
+      },
+    });
+    if (job.status === "COMPLETED") {
+      return {
+        revisionId,
+        duplicate: true,
+        ...(job.checkpoint as Record<string, unknown> | null),
+      };
+    }
+    await this.prisma.jobRun.update({
+      where: { id: job.id },
+      data: {
+        status: "RUNNING",
+        attempts: { increment: 1 },
+        startedAt: new Date(),
+        error: null,
+      },
+    });
+    try {
+      await this.evaluateGames(
+        revision.draw.lottery.slug as LotterySlug,
+        revision.id,
+        revision.numbers,
+        revision.luckyMonth,
+      );
+      if (!publishAnalysis) {
+        const result = { analysisStatus: "DEFERRED" };
+        await this.completeJob(job.id, result);
+        return { revisionId, duplicate: false, ...result };
+      }
+      const input = {
+        lottery: revision.draw.lottery.slug as LotterySlug,
+        contestNumber: revision.draw.contestNumber,
+      };
     const confirmedCount = await this.prisma.draw.count({
       where: {
         lottery: { slug: input.lottery },
@@ -131,11 +209,11 @@ export class LotteryFlowService {
       },
     });
     if (confirmedCount < 2) {
-      return {
-        revisionId: revision.id,
-        duplicate: false,
+      const result = {
         analysisStatus: "WAITING_FOR_MINIMUM_HISTORY",
       };
+      await this.completeJob(job.id, result);
+      return { revisionId: revision.id, duplicate: false, ...result };
     }
     const contests = await this.prisma.draw.findMany({
       where: {
@@ -166,20 +244,31 @@ export class LotteryFlowService {
           details: gaps,
         },
       });
-      return {
-        revisionId: revision.id,
-        duplicate: false,
+      const result = {
         analysisStatus: "BLOCKED_BY_HISTORY_GAPS",
         gaps,
       };
+      await this.completeJob(job.id, result);
+      return { revisionId: revision.id, duplicate: false, ...result };
     }
     const analysis = await this.recalculate(input.lottery);
-    return {
-      revisionId: revision.id,
-      duplicate: false,
+    const result = {
       snapshotId: analysis.snapshotId,
       suggestionBatchId: analysis.batchId,
     };
+      await this.completeJob(job.id, result);
+      return { revisionId: revision.id, duplicate: false, ...result };
+    } catch (error) {
+      await this.prisma.jobRun.update({
+        where: { id: job.id },
+        data: {
+          status: "FAILED",
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: new Date(),
+        },
+      });
+      throw error;
+    }
   }
 
   async syncLatest(slug: LotterySlug) {
@@ -233,8 +322,22 @@ export class LotteryFlowService {
         where: { userId: null, snapshot: { lotteryId: lottery.id } },
         orderBy: { createdAt: "desc" },
       });
-      const snapshot = await tx.analysisSnapshot.create({
-        data: {
+      const snapshot = await tx.analysisSnapshot.upsert({
+        where: {
+          lotteryId_cutoffContest_datasetHash_version: {
+            lotteryId: lottery.id,
+            cutoffContest: dataset.contest_numbers.at(-1)!,
+            datasetHash: dataset.dataset_hash,
+            version: "descriptive-v1",
+          },
+        },
+        update: {
+          status: "PUBLISHED",
+          windows: [10, 25, 50, 100, 250],
+          metadata: analysis as Prisma.InputJsonValue,
+          publishedAt: new Date(),
+        },
+        create: {
           lotteryId: lottery.id,
           cutoffContest: dataset.contest_numbers.at(-1)!,
           datasetHash: dataset.dataset_hash,
@@ -362,6 +465,74 @@ export class LotteryFlowService {
         include: { evaluations: { include: { drawRevision: true } } },
       }),
     );
+  }
+
+  async evaluateContest(slug: LotterySlug, contestNumber: number) {
+    const lottery = await this.prisma.lottery.findUniqueOrThrow({
+      where: { slug },
+    });
+    const draw = await this.prisma.draw.findUnique({
+      where: {
+        lotteryId_contestNumber: {
+          lotteryId: lottery.id,
+          contestNumber,
+        },
+      },
+      include: { revisions: true },
+    });
+    if (!draw?.canonicalRevisionId) {
+      throw new NotFoundException("Concurso confirmado não encontrado");
+    }
+    const revision = draw.revisions.find(
+      (candidate) => candidate.id === draw.canonicalRevisionId,
+    )!;
+    await this.evaluateGames(
+      slug,
+      revision.id,
+      revision.numbers,
+      revision.luckyMonth,
+    );
+    return { contestNumber, revisionId: revision.id, evaluated: true };
+  }
+
+  async backtest(
+    slug: LotterySlug,
+    options: {
+      ticketsPerContest?: number;
+      seeds?: number[];
+      minTraining?: number;
+      strategy?: "uniform" | "recent-frequency";
+    } = {},
+  ) {
+    const dataset = await this.dataset(slug);
+    const minTraining = options.minTraining ?? 25;
+    if (dataset.draws.length <= minTraining) {
+      throw new BadRequestException(
+        `Backtest exige mais de ${minTraining} concursos confirmados`,
+      );
+    }
+    return this.analytics("/v1/backtest", {
+      dataset,
+      strategy: options.strategy ?? "recent-frequency",
+      tickets_per_contest: options.ticketsPerContest ?? 5,
+      pick_count: RULES[slug].simplePick,
+      seeds: options.seeds ?? [1, 2, 3, 4, 5],
+      min_training: minTraining,
+    });
+  }
+
+  private async completeJob(
+    id: string,
+    checkpoint: Record<string, unknown>,
+  ) {
+    await this.prisma.jobRun.update({
+      where: { id },
+      data: {
+        status: "COMPLETED",
+        checkpoint: checkpoint as Prisma.InputJsonValue,
+        finishedAt: new Date(),
+      },
+    });
   }
 
   private async evaluateGames(

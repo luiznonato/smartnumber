@@ -11,10 +11,19 @@ SFTP, sem shell para Docker ou configuração Nginx. O demo público continua se
 estático. `docs/VPS_DEPLOY.md` registra a configuração necessária para preservar
 o Hestia e encaminhar `/api` ao backend local.
 
-Pendências prioritárias: importar e reconciliar todo o histórico oficial; mover a
-orquestração síncrona para o worker/outbox; ampliar RLS para todas as entidades
-privadas; publicar o backend na VPS; SMTP, billing, backup e restauração.
+Pendências prioritárias: importar e reconciliar todo o histórico oficial; ampliar
+RLS para todas as entidades privadas; publicar o backend na VPS; SMTP, billing,
+backup e restauração.
 
-Próximo passo preciso: implementar um importador histórico paginado e reiniciável,
-com checkpoint e reconciliação de lacunas, usando arquivo oficial administrado
-enquanto a origem remota bloquear esta VPS.
+O CLI agora importa arrays de payloads oficiais em ordem, registra progresso em
+`ImportRun` e retoma pelo UUID do checkpoint. Ainda faltam paginação remota,
+limite de requisições e reconciliação de cobertura total.
+
+O pós-importação agora é assíncrono: a API grava revisão+outbox, o worker consome
+em ordem, chama um endpoint interno autenticado e marca publicação apenas após o
+`JobRun` idempotente concluir. O ciclo foi exercitado localmente até zerar nove
+eventos pendentes.
+
+Próximo passo preciso: ampliar as políticas e testes RLS para entidades privadas
+filhas (`GameRevision`, `TrackingSubscription`, assinatura e quotas) e implementar
+gerenciamento de verificação de e-mail/recuperação de senha.

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Inject, Param, Post, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  Post,
+  Req,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { Role } from "@prisma/client";
 import type { FastifyRequest } from "fastify";
 import { lotterySlugSchema } from "@atlas/contracts";
@@ -69,5 +79,34 @@ export class SavedGameController {
   ) {
     const session = await this.auth.authenticate(request);
     return this.flow.saveGame(session.user.id, body.suggestedGameId, body.name);
+  }
+}
+
+@Controller("internal/draw-events")
+export class InternalDrawEventController {
+  constructor(
+    @Inject(LotteryFlowService) private readonly flow: LotteryFlowService,
+  ) {}
+
+  @Post("process")
+  process(
+    @Headers("x-atlas-worker-secret") suppliedSecret: string | undefined,
+    @Body() body: { revisionId?: string; publishAnalysis?: boolean },
+  ) {
+    const expectedSecret = process.env.WORKER_INTERNAL_SECRET;
+    if (
+      !expectedSecret ||
+      expectedSecret.length < 32 ||
+      suppliedSecret !== expectedSecret
+    ) {
+      throw new UnauthorizedException("Credencial interna inválida");
+    }
+    if (!body.revisionId) {
+      throw new UnauthorizedException("Evento interno inválido");
+    }
+    return this.flow.processRevision(
+      body.revisionId,
+      body.publishAnalysis !== false,
+    );
   }
 }
