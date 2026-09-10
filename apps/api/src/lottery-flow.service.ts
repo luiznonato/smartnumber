@@ -312,10 +312,17 @@ export class LotteryFlowService {
       await this.completeJob(job.id, result);
       return { revisionId: revision.id, duplicate: false, ...result };
     }
-    if (confirmedCount < 10) {
+    const freshness = await this.prisma.lottery.findUniqueOrThrow({
+      where: { slug: input.lottery },
+      select: { freshnessStatus: true },
+    });
+    if (confirmedCount < 10 || freshness.freshnessStatus !== "VERIFIED") {
       const snapshotId = await this.recalculateAnalysisOnly(input.lottery);
       const result = {
-        analysisStatus: "WAITING_FOR_STRATEGY_SAMPLE",
+        analysisStatus:
+          confirmedCount < 10
+            ? "WAITING_FOR_STRATEGY_SAMPLE"
+            : "ANALYSIS_ONLY_UNVERIFIED_BASE",
         snapshotId,
       };
       await this.completeJob(job.id, result);
@@ -675,6 +682,15 @@ export class LotteryFlowService {
     const dataset = await this.dataset(slug);
     if (dataset.draws.length < 2) {
       throw new BadRequestException("São necessários pelo menos dois concursos");
+    }
+    const lotteryState = await this.prisma.lottery.findUniqueOrThrow({
+      where: { slug },
+      select: { freshnessStatus: true },
+    });
+    if (lotteryState.freshnessStatus !== "VERIFIED") {
+      throw new BadRequestException(
+        "Publicação automática exige base atual verificada",
+      );
     }
     const rules = RULES[slug];
     const analysis = await this.analytics("/v1/analyze", {

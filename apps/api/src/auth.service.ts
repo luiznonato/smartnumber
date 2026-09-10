@@ -192,6 +192,7 @@ export class AuthService {
             email: true,
             role: true,
             suspendedAt: true,
+            emailVerifiedAt: true,
           },
         },
       },
@@ -217,6 +218,112 @@ export class AuthService {
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  sessions(userId: string) {
+    return this.prisma.session.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, createdAt: true, expiresAt: true },
+    });
+  }
+
+  async revokeSession(userId: string, sessionId: string) {
+    const result = await this.prisma.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (result.count !== 1) {
+      throw new UnauthorizedException("Sessão não encontrada");
+    }
+    return { revoked: true };
+  }
+
+  async requestEmailVerification(userId: string) {
+    const token = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    await this.prisma.emailVerification.create({
+      data: {
+        userId,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
+    return {
+      queued: Boolean(process.env.SMTP_URL),
+      ...(process.env.NODE_ENV === "production" ? {} : { developmentToken: token }),
+    };
+  }
+
+  async verifyEmail(token: string) {
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const verification = await this.prisma.emailVerification.findUnique({
+      where: { tokenHash },
+    });
+    if (
+      !verification ||
+      verification.usedAt ||
+      verification.expiresAt <= new Date()
+    ) {
+      throw new UnauthorizedException("Token de verificação inválido");
+    }
+    await this.prisma.$transaction([
+      this.prisma.emailVerification.update({
+        where: { id: verification.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: verification.userId },
+        data: { emailVerifiedAt: new Date() },
+      }),
+    ]);
+    return { verified: true };
+  }
+
+  async requestPasswordReset(emailInput: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: emailInput.trim().toLowerCase() },
+    });
+    if (!user || user.suspendedAt) return { accepted: true };
+    const token = randomBytes(32).toString("base64url");
+    await this.prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+    return {
+      accepted: true,
+      queued: Boolean(process.env.SMTP_URL),
+      ...(process.env.NODE_ENV === "production" ? {} : { developmentToken: token }),
+    };
+  }
+
+  async resetPassword(token: string, password: string) {
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const reset = await this.prisma.passwordReset.findUnique({
+      where: { tokenHash },
+    });
+    if (!reset || reset.usedAt || reset.expiresAt <= new Date()) {
+      throw new UnauthorizedException("Token de recuperação inválido");
+    }
+    const passwordHash = await hashPassword(password);
+    await this.prisma.$transaction([
+      this.prisma.passwordReset.update({
+        where: { id: reset.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: reset.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId: reset.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return { reset: true };
   }
 
   private async createSession(userId: string, adminMfaVerified = false) {

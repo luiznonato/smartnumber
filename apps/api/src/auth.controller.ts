@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Inject, Post, Req, Res } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Req,
+  Res,
+} from "@nestjs/common";
 import { Role } from "@prisma/client";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthService } from "./auth.service.js";
@@ -55,6 +64,42 @@ export class AuthController {
     await this.auth.logout(request);
     reply.clearCookie("atlas_session", { path: "/" });
     return { ok: true };
+  }
+
+  @Post("email-verification/request")
+  async requestVerification(@Req() request: FastifyRequest) {
+    const session = await this.auth.authenticate(request);
+    return this.auth.requestEmailVerification(session.user.id);
+  }
+
+  @Post("email-verification/confirm")
+  verifyEmail(@Body() body: { token: string }) {
+    return this.auth.verifyEmail(body.token);
+  }
+
+  @Post("password-reset/request")
+  requestPasswordReset(@Body() body: { email: string }) {
+    return this.auth.requestPasswordReset(body.email);
+  }
+
+  @Post("password-reset/confirm")
+  resetPassword(@Body() body: { token: string; password: string }) {
+    return this.auth.resetPassword(body.token, body.password);
+  }
+
+  @Get("sessions")
+  async sessions(@Req() request: FastifyRequest) {
+    const session = await this.auth.authenticate(request);
+    return this.auth.sessions(session.user.id);
+  }
+
+  @Post("sessions/:id/revoke")
+  async revokeSession(
+    @Req() request: FastifyRequest,
+    @Param("id") id: string,
+  ) {
+    const session = await this.auth.authenticate(request);
+    return this.auth.revokeSession(session.user.id, id);
   }
 }
 

@@ -287,9 +287,21 @@ export class AdminImportService {
     });
     try {
       for (const [index, row] of accepted.entries()) {
-        await this.flow.importConfirmed(row.input!, row.raw, {
-          publishAnalysis: index === accepted.length - 1,
-        });
+        const normalized =
+          typeof row.raw === "object" &&
+          row.raw !== null &&
+          "numero" in row.raw
+            ? this.caixa.normalize(run.lotterySlug, row.raw)
+            : null;
+        await this.flow.importConfirmed(
+          normalized?.input ?? row.input!,
+          row.raw,
+          {
+            publishAnalysis: index === accepted.length - 1,
+            prizes: normalized?.prizes,
+            nextPublication: normalized?.nextContest,
+          },
+        );
         await this.prisma.importRun.update({
           where: { id: run.id },
           data: { checkpoint: { nextIndex: index + 1 } },

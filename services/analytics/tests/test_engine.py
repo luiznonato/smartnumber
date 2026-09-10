@@ -21,6 +21,8 @@ def test_backtest_uses_only_prior_draws():
  draws=[[1,2],[2,3],[3,4],[4,5],[1,5]]
  r=backtest(list(range(1,6)),draws,5,2,2,2,[1],2,"uniform")
  assert r["target_leakage"] is False and r["runs"][0]["contests"]==3
+ assert r["same_ticket_count_and_size"] is True
+ assert r["comparison"]["contest_seed_units"]==3
 
 def test_recent_frequency_uses_documented_smoothing():
  draws=[[1,2] for _ in range(10)]

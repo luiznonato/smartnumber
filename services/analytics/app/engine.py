@@ -121,12 +121,24 @@ def generate(draws:list[list[int]],universe:int,pick:int,count:int,seed:int,stra
  if len(selected)<count:raise ValueError("constraints or overlap limit are infeasible within budget")
  return {"strategy":strategy,"strategy_version":"historical-profile-v1","seed":seed,"prng":"numpy-pcg64","score_version":"profile-reference-percentile-v1","sample":{"n":actual_window,"window":window},"parameters":{"reference_size":reference_size},"games":selected}
 def backtest(contests,draws,universe,drawn,pick,tickets,seeds,min_training,strategy):
- runs=[]
+ required=25 if strategy=="historical-profile" else 10 if strategy in {"recent-frequency","diversified"} else 1
+ start=max(min_training,required);runs=[];all_differences=[]
  for seed in seeds:
-  hits=[]
-  for i in range(min_training,len(draws)):
+  hits=[];baseline_hits=[]
+  for i in range(start,len(draws)):
    batch=generate(draws[:i],universe,pick,tickets,seed*1_000_003+i,strategy,[],[],None)
+   baseline=generate(draws[:i],universe,pick,tickets,seed*1_000_003+i+7919,"uniform",[],[],None)
    hits.append([len(set(g["numbers"])&set(draws[i])) for g in batch["games"]])
-  flat=[h for contest in hits for h in contest];runs.append({"seed":seed,"contests":len(hits),"mean_hits":float(np.mean(flat)) if flat else None,"contest_means":[float(np.mean(x)) for x in hits]})
+   baseline_hits.append([len(set(g["numbers"])&set(draws[i])) for g in baseline["games"]])
+  flat=[h for contest in hits for h in contest];baseline_flat=[h for contest in baseline_hits for h in contest]
+  contest_means=[float(np.mean(values)) for values in hits];baseline_means=[float(np.mean(values)) for values in baseline_hits]
+  differences=[value-baseline for value,baseline in zip(contest_means,baseline_means)];all_differences.extend(differences)
+  runs.append({"seed":seed,"contests":len(hits),"mean_hits":float(np.mean(flat)) if flat else None,"baseline_mean_hits":float(np.mean(baseline_flat)) if baseline_flat else None,"contest_means":contest_means,"baseline_contest_means":baseline_means})
  baseline=pick*drawn/universe
- return {"protocol":"walk-forward-v1","target_leakage":False,"contest_is_unit":True,"theoretical_mean_hits":baseline,"runs":runs,"conclusion":"Sem evidência de vantagem sobre o acaso; resultados descritivos exigem protocolo temporal e incerteza."}
+ if all_differences:
+  bootstrap_rng=_rng(20260910);means=[float(np.mean(bootstrap_rng.choice(all_differences,size=len(all_differences),replace=True))) for _ in range(2000)]
+  comparison={"contest_seed_units":len(all_differences),"mean_difference":float(np.mean(all_differences)),"confidence_95":[float(np.percentile(means,2.5)),float(np.percentile(means,97.5))]}
+ else:comparison={"contest_seed_units":0,"mean_difference":None,"confidence_95":[None,None]}
+ superior=comparison["confidence_95"][0] is not None and comparison["confidence_95"][0]>0
+ conclusion="Evidência fora da amostra sob este protocolo; não garante desempenho futuro." if superior else "Não foi demonstrado desempenho superior ao aleatório neste teste."
+ return {"protocol":"walk-forward-v2","target_leakage":False,"contest_is_unit":True,"same_ticket_count_and_size":True,"theoretical_mean_hits":baseline,"runs":runs,"comparison":comparison,"conclusion":conclusion}

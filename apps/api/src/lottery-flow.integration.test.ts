@@ -11,6 +11,7 @@ import {
 } from "vitest";
 import { AuthService } from "./auth.service.js";
 import { hashPassword } from "./auth.js";
+import { AdminImportService } from "./admin-import.service.js";
 import { PrismaService } from "./database.js";
 import { CaixaServiceBusProvider } from "./ingestion.js";
 import { LotteryFlowService } from "./lottery-flow.service.js";
@@ -31,6 +32,7 @@ suite("persistent official-result lifecycle", () => {
   const prisma = new PrismaService();
   const auth = new AuthService(prisma);
   const flow = new LotteryFlowService(prisma);
+  const adminImports = new AdminImportService(prisma, flow);
   const provider = new CaixaServiceBusProvider();
 
   beforeAll(async () => {
@@ -278,5 +280,105 @@ suite("persistent official-result lifecycle", () => {
     });
     expect(storedAdmin.adminMfaEnabledAt).not.toBeNull();
     expect(storedAdmin.adminMfaRecoveryHashes).toHaveLength(8);
+  });
+
+  it("prevents cross-user access through service authorization and RLS", async () => {
+    const userA = await auth.register(
+      "user-a@integration.test",
+      "integration-password-a",
+    );
+    const userB = await auth.register(
+      "user-b@integration.test",
+      "integration-password-b",
+    );
+    const batchA = await flow.generateForUser(userA.user.id, {
+      lottery: "mega-sena",
+      strategy: "uniform",
+      count: 1,
+      seed: 1,
+      requestKey: "user-a-generation",
+    });
+    const batchB = await flow.generateForUser(userB.user.id, {
+      lottery: "mega-sena",
+      strategy: "uniform",
+      count: 1,
+      seed: 2,
+      requestKey: "user-b-generation",
+    });
+    const replayedBatchA = await flow.generateForUser(userA.user.id, {
+      lottery: "mega-sena",
+      strategy: "uniform",
+      count: 1,
+      seed: 999,
+      requestKey: "user-a-generation",
+    });
+    expect(replayedBatchA.id).toBe(batchA.id);
+    const usageA = await prisma.withUser(userA.user.id, (tx) =>
+      tx.usageCounter.findFirstOrThrow({
+        where: { userId: userA.user.id, key: "generated-games" },
+      }),
+    );
+    expect(usageA.used).toBe(1);
+    const gameA = await flow.saveGame(
+      userA.user.id,
+      batchA.games[0].id,
+      "A",
+    );
+    const gameB = await flow.saveGame(
+      userB.user.id,
+      batchB.games[0].id,
+      "B",
+    );
+    const visibleToA = await prisma.withUser(userA.user.id, (tx) =>
+      tx.savedGame.findMany(),
+    );
+    expect(visibleToA.map((game) => game.id)).toEqual([gameA.id]);
+    await expect(
+      flow.archiveGame(userA.user.id, gameB.id, true),
+    ).rejects.toThrow("Jogo não encontrado");
+    await expect(
+      flow.saveGame(userA.user.id, batchB.games[0].id, "invasão"),
+    ).rejects.toThrow("Sugestão não encontrada");
+  });
+
+  it("previews and confirms an official CSV idempotently", async () => {
+    const actor = await auth.register(
+      "importer@integration.test",
+      "integration-importer-password",
+    );
+    const preview = await adminImports.preview(actor.user.id, {
+      lottery: "mega-sena",
+      fileName: "mega-oficial.csv",
+      format: "csv",
+      sourceUrl:
+        "https://loterias.caixa.gov.br/Paginas/Mega-Sena.aspx",
+      content: [
+        "concurso;data;dezenas",
+        '1;1996-03-11;"04 05 30 33 41 52"',
+        "2;1996-03-18;09 37",
+      ].join("\n"),
+      mapping: {
+        contestNumber: "concurso",
+        drawDate: "data",
+        numbers: "dezenas",
+      },
+    });
+    expect(preview.summary).toEqual({
+      accepted: 1,
+      duplicate: 0,
+      conflict: 0,
+      invalid: 1,
+    });
+    const confirmed = await adminImports.confirm(
+      actor.user.id,
+      preview.importRunId,
+    );
+    expect(confirmed.imported).toBe(1);
+    const replay = await adminImports.confirm(
+      actor.user.id,
+      preview.importRunId,
+    );
+    expect(replay.duplicate).toBe(true);
+    expect(await admin.draw.count()).toBe(1);
   });
 });
