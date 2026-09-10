@@ -176,11 +176,17 @@ export class LotteryFlowService {
   }
 
   async syncLatest(slug: LotterySlug) {
-    const fetched = (await this.caixa.latest(slug)) as {
-      input: unknown;
-      raw: unknown;
-    };
-    return this.importConfirmed(fetched.input, fetched.raw);
+    try {
+      const fetched = (await this.caixa.latest(slug)) as {
+        input: unknown;
+        raw: unknown;
+      };
+      return this.importConfirmed(fetched.input, fetched.raw);
+    } catch (error) {
+      throw new BadGatewayException(
+        error instanceof Error ? error.message : "Fonte CAIXA indisponível",
+      );
+    }
   }
 
   async recalculate(slug: LotterySlug) {

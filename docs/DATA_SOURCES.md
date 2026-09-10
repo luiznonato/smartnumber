@@ -18,6 +18,12 @@ SLA encontrados. O adaptador `CaixaServiceBusProvider` usa caminhos fixos para
 Mega-Sena, Lotofácil e Dia de Sorte, timeout, tentativas limitadas e parser
 versionado. Não aceita URL fornecida pelo usuário.
 
+A validação de conteúdo ocorreu pelo coletor web isolado. Requisições originadas
+diretamente desta VM receberam HTTP 403, inclusive com cabeçalhos de navegador.
+Portanto a sincronização externa não foi declarada operacional neste runtime; o
+endpoint administrativo responde 502 e o importador JSON continua sendo a
+alternativa controlada.
+
 A sincronização do último concurso persiste payload bruto e revisão. Se houver
 lacuna entre os concursos locais, registra `HISTORY_GAP` e bloqueia a publicação
 automática de nova análise. Isso não torna a cobertura histórica completa.
