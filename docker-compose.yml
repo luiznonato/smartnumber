@@ -4,12 +4,14 @@ services:
     image: postgres:17.6-alpine
     environment: {POSTGRES_DB: atlas_loto, POSTGRES_USER: atlas, POSTGRES_PASSWORD: atlas}
     volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_loto"], interval: 5s, timeout: 3s, retries: 10}
     networks: [internal]
   redis:
     image: redis:8.2.1-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes: [redis_data:/data]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10}
     networks: [internal]
   analytics:
