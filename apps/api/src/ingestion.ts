@@ -8,7 +8,7 @@ export class CaixaServiceBusProvider implements LotteryResultsProvider{
  async byContest(lottery:string,contest:number){if(!Number.isInteger(contest)||contest<1)throw new Error("Concurso inválido");return this.fetch(lottery,contest)}
  normalize(lottery:string,raw:unknown){
   if(typeof raw!=="object"||raw===null)throw new Error("Payload CAIXA inválido");const x=raw as Record<string,unknown>,date=String(x.dataApuracao??"").split("/");
-  if(date.length!==3)throw new Error("Data CAIXA inválida");const luckyName=String(x.nomeTimeCoracaoMesSorte??"").trim().toLocaleLowerCase("pt-BR"),luckyMonth=months.indexOf(luckyName)+1;
+  if(date.length!==3)throw new Error("Data CAIXA inválida");const luckyName=String(x.nomeTimeCoracaoMesSorte??"").trim().toLocaleLowerCase("pt-BR"),numericLuckyMonth=Number(luckyName),luckyMonth=Number.isInteger(numericLuckyMonth)&&numericLuckyMonth>=1&&numericLuckyMonth<=12?numericLuckyMonth:months.indexOf(luckyName)+1;
   return drawSchema.parse({lottery,contestNumber:Number(x.numero),drawDate:`${date[2]}-${date[1]}-${date[0]}`,numbers:Array.isArray(x.listaDezenas)?x.listaDezenas.map(Number):[],originalOrder:Array.isArray(x.dezenasSorteadasOrdemSorteio)?x.dezenasSorteadasOrdemSorteio.map(Number):undefined,luckyMonth:lottery==="dia-de-sorte"?luckyMonth:undefined,sourceUrl:`${this.base}/${caixaPaths[lottery]}/${Number(x.numero)}`,fetchedAt:new Date().toISOString(),parserVersion:"caixa-servicebus-v1"});
  }
  private async fetch(lottery:string,contest?:number){const path=caixaPaths[lottery];if(!path)throw new Error("Modalidade não permitida");const url=`${this.base}/${path}${contest?`/${contest}`:""}`;let error:unknown;

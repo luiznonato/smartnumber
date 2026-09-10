@@ -38,17 +38,19 @@ Data da auditoria: 2026-09-10.
 - Estratégia `recent-frequency`: pesos `contagem histórica + 1`, normalizados, com
   amostragem ponderada sem reposição.
 - Score atual: centralidade do percentil de soma na janela de até 100 concursos.
-  É calculado com o dataset enviado, mas ainda não está conectado à API nem
-  persistido como snapshot. Portanto não deve aparecer no produto integrado até
-  existir dataset hash, corte temporal e persistência rastreável.
+  É calculado com o dataset enviado pela API. O fluxo integrado persiste dataset
+  hash, corte temporal, snapshot, versão, seed, PRNG e decomposição antes de
+  publicar o lote.
 - Explicação atual: percentil real de soma, janela e aviso metodológico. No demo
   publicado ela não é utilizada.
+- Dia de Sorte: as dezenas continuam usando PCG64 e frequência recente. O mês é
+  derivado separadamente pela API em `lottery-flow.service.ts`, com seed própria,
+  contador SHA-256 e baseline uniforme 1/12. O mês não altera o score das dezenas.
 
 ## Conclusão
 
-O produto tinha três implementações distintas de geração. O demo e a API eram
-baselines aleatórios e não análises. O único código que usa histórico está no
-serviço Python, ainda desconectado do fluxo persistente. A aplicação deve manter
-“Aleatório — referência de comparação” separada de sugestões analíticas e somente
-exibir score depois de persistir dataset hash, concurso de corte, versão, seed,
-estratégia, decomposição e snapshot.
+O produto mantém três implementações distintas de geração. O demo e o endpoint
+de baseline da API são aleatórios e não análises. O fluxo persistente integrado
+usa o serviço Python e publica scores somente junto de dataset hash, concurso de
+corte, versão, seed, estratégia, decomposição e snapshot. “Aleatório — referência
+de comparação” permanece separado das sugestões por frequência recente.

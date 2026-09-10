@@ -20,6 +20,14 @@ Também foram executados em PostgreSQL e Redis isolados:
 - replay do mesmo resultado sem duplicar revisão e recuperando a avaliação;
 - build das quatro imagens Docker (`api`, `worker`, `web`, `analytics`).
 
+Em seguida, o ciclo persistente foi automatizado em banco isolado
+`atlas_loto_test` para as três modalidades. As três execuções usam os concursos
+oficiais 1–3 registrados como fixtures: importam 1–2, calculam pelo FastAPI,
+salvam uma sugestão, importam o concurso 3, conferem o jogo imutável e publicam
+um lote sucessor vinculado. O teste do Dia de Sorte também verifica geração do
+mês com seed separada e sua conferência independente. Resultado executado:
+1 arquivo, 3 testes aprovados.
+
 ## Implementado sem verificação externa
 
 As imagens e os serviços de banco foram exercitados localmente. A restauração de backup e o Compose completo com proxy não foram executados.

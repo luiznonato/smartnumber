@@ -53,6 +53,16 @@ npm run build
 docker compose config
 ```
 
+O ciclo persistente das três modalidades usa exclusivamente um banco cujo nome
+termine em `_test`:
+
+```bash
+DATABASE_URL='postgresql://.../atlas_loto_test?options=-c%20role%3Datlas_app' \
+TEST_ADMIN_DATABASE_URL='postgresql://.../atlas_loto_test' \
+INTERNAL_ANALYTICS_URL='http://127.0.0.1:8001' \
+npm run test:integration -w @atlas/api
+```
+
 ## Demonstração Cloudflare
 
 `apps/web` gera uma exportação estática sem persistência. Após autenticar uma conta que administre `nonato.me`, publique o domínio configurado:

@@ -26,4 +26,15 @@ describe("CaixaServiceBusProvider", () => {
     });
     expect(result.luckyMonth).toBe(9);
   });
+
+  it("normalizes the numeric month used by official Dia de Sorte payloads", () => {
+    const result = provider.normalize("dia-de-sorte", {
+      numero: 1,
+      dataApuracao: "19/05/2018",
+      listaDezenas: ["03", "05", "08", "09", "19", "21", "30"],
+      dezenasSorteadasOrdemSorteio: ["03", "09", "05", "30", "08", "19", "21"],
+      nomeTimeCoracaoMesSorte: "2",
+    });
+    expect(result.luckyMonth).toBe(2);
+  });
 });

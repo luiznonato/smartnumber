@@ -27,3 +27,15 @@ alternativa controlada.
 A sincronização do último concurso persiste payload bruto e revisão. Se houver
 lacuna entre os concursos locais, registra `HISTORY_GAP` e bloqueia a publicação
 automática de nova análise. Isso não torna a cobertura histórica completa.
+
+## Fixtures de regressão
+
+`apps/api/src/official-lifecycle-fixtures.ts` registra os campos de resultado dos
+concursos 1–3 de Mega-Sena, Lotofácil e Dia de Sorte, coletados da interface
+CAIXA acima em 2026-09-10. As URLs seguem o padrão fixo
+`.../api/{modalidade}/{concurso}`. Os testes preservam a ordem de extração quando
+publicada. No Dia de Sorte, o campo oficial observado para o mês contém números
+de 1 a 12; o parser também aceita nomes em português.
+
+Essas nove fixtures validam parsing e o ciclo persistente, mas não representam
+histórico completo nem autorizam sugestões atuais.

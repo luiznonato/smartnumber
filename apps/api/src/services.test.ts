@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generateLuckyMonth } from "./lottery-flow.service.js";
 import { GameService, LotteryService } from "./services.js";
 
 describe("domain", () => {
@@ -45,6 +46,22 @@ describe("domain", () => {
       3,
     );
     expect(result).toEqual({ numberHits: 2, luckyMonthHit: true });
+  });
+
+  it("derives a reproducible independent Dia de Sorte month", () => {
+    const first = generateLuckyMonth("month-seed", 0);
+    expect(first).toBeGreaterThanOrEqual(1);
+    expect(first).toBeLessThanOrEqual(12);
+    expect(generateLuckyMonth("month-seed", 0)).toBe(first);
+    expect(
+      Array.from({ length: 4 }, (_, index) =>
+        generateLuckyMonth("another-seed", index),
+      ),
+    ).not.toEqual(
+      Array.from({ length: 4 }, (_, index) =>
+        generateLuckyMonth("month-seed", index),
+      ),
+    );
   });
 
   it("evaluates expanded tickets for all modalities", () => {

@@ -21,6 +21,13 @@ type AnalyticsGame = {
   explanation: Record<string, unknown>;
 };
 
+export function generateLuckyMonth(monthSeed: string, index: number): number {
+  const digest = createHash("sha256")
+    .update(`${monthSeed}:${index}`)
+    .digest();
+  return (digest.readUInt32BE(0) % 12) + 1;
+}
+
 @Injectable()
 export class LotteryFlowService {
   private readonly caixa = new CaixaServiceBusProvider();
@@ -214,6 +221,12 @@ export class LotteryFlowService {
       score_version: string;
       games: AnalyticsGame[];
     };
+    const monthSeed =
+      slug === "dia-de-sorte"
+        ? createHash("sha256")
+            .update(`${generation.seed}:lucky-month-v1`)
+            .digest("hex")
+        : null;
     const result = await this.prisma.$transaction(async (tx) => {
       const lottery = await tx.lottery.findUniqueOrThrow({ where: { slug } });
       const previous = await tx.suggestionBatch.findFirst({
@@ -265,17 +278,42 @@ export class LotteryFlowService {
           targetContest: dataset.contest_numbers.at(-1)! + 1,
           seed: String(generation.seed),
           prng: generation.prng,
-          constraints: {},
+          constraints: monthSeed
+            ? {
+                luckyMonth: {
+                  strategy: "uniform-random-reference",
+                  seed: monthSeed,
+                  prng: "sha256-counter-v1",
+                },
+              }
+            : {},
           datasetHash: dataset.dataset_hash,
           scoreVersion: generation.score_version,
           status: "PUBLISHED",
           previousBatchId: previous?.id,
           publishedAt: new Date(),
           games: {
-            create: generation.games.map((game) => ({
+            create: generation.games.map((game, index) => ({
               numbers: game.numbers,
+              luckyMonth: monthSeed
+                ? generateLuckyMonth(monthSeed, index)
+                : null,
               score: game.score ?? 0,
-              scoreBreakdown: game.explanation as Prisma.InputJsonValue,
+              scoreBreakdown: {
+                ...game.explanation,
+                ...(monthSeed
+                  ? {
+                      lucky_month: {
+                        value: generateLuckyMonth(monthSeed, index),
+                        strategy: "uniform-random-reference",
+                        seed: monthSeed,
+                        prng: "sha256-counter-v1",
+                        notice:
+                          "Referência uniforme 1/12; não altera o score das dezenas.",
+                      },
+                    }
+                  : {}),
+              } as Prisma.InputJsonValue,
             })),
           },
         },
