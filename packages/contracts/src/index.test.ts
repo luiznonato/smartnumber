@@ -1,0 +1,1 @@
+import {describe,it,expect} from "vitest";import {gameSchema} from "./index.js";describe("game contracts",()=>{it("rejects range errors",()=>expect(gameSchema.safeParse({lottery:"mega-sena",numbers:[1,2,3,4,5,61]}).success).toBe(false));it("requires Dia de Sorte month",()=>expect(gameSchema.safeParse({lottery:"dia-de-sorte",numbers:[1,2,3,4,5,6,7]}).success).toBe(false));});

@@ -1,1 +1,103 @@
-# smartnumber
+# Atlas Loto
+
+Plataforma SaaS em português para análise estatística transparente de Mega-Sena, Lotofácil e Dia de Sorte. O nome é configurável por `APP_NAME`/`NEXT_PUBLIC_APP_NAME`.
+
+> O histórico não torna uma combinação específica mais provável. A aplicação não registra apostas na CAIXA e não vende apostas, bolões ou prêmios.
+
+## Requisitos
+
+Node.js 22+, Python 3.13+, PostgreSQL 17, Redis 8 e Docker Compose. Copie `.env.example` para `.env` e substitua todos os segredos antes de uso fora de desenvolvimento.
+
+## Desenvolvimento
+
+```bash
+npm ci
+python3 -m venv services/analytics/.venv
+services/analytics/.venv/bin/pip install -r services/analytics/requirements-dev.txt
+npm run db:generate
+npm run dev
+```
+
+Serviços: web `:3000`, API/OpenAPI `:3001/docs`, analytics interno `:8001` e worker BullMQ.
+
+## Banco e comandos
+
+```bash
+DATABASE_URL="$MIGRATION_DATABASE_URL" npm run db:migrate
+npm run db:seed
+npm run cli -- generate lottery=mega-sena count=3 seed=aceite
+npm run cli -- import-history lottery=mega-sena file=/caminho/oficial.json
+npm run cli -- sync-result lottery=mega-sena
+npm run cli -- sync-history lottery=mega-sena limit=25
+npm run cli -- snapshot lottery=mega-sena
+npm run cli -- backtest lottery=mega-sena
+npm run cli -- evaluate-games lottery=mega-sena contest=0
+```
+
+Os comandos persistentes exigem `DATABASE_URL` e o serviço analítico. O importador
+aceita um objeto ou array com payloads brutos da interface CAIXA, ordena por
+concurso, registra checkpoint em `ImportRun` e publica a análise somente ao final.
+Uma execução interrompida pode ser retomada com o mesmo arquivo:
+
+```bash
+npm run cli -- import-history lottery=mega-sena \
+  file=/caminho/oficial.json resume=uuid-do-import-run
+```
+
+`sync-result` e `sync-history` exigem `CAIXA_ENABLED=true`. A sincronização
+histórica processa no máximo 100 concursos por chamada e retorna `importRunId`;
+continue com `resume=<uuid>`. Ela falha de modo seguro quando o portal CAIXA
+bloqueia o servidor. Nenhum desses comandos cria resultados fictícios.
+
+Endpoints integrados disponíveis após subir API, analytics e banco:
+
+- `POST /api/auth/register` e `POST /api/auth/login`;
+- `POST /api/admin/auth/login`;
+- `POST /api/admin/draws/import`;
+- `POST /api/admin/draws/:lottery/sync-latest`;
+- `POST /api/admin/draws/:lottery/sync-history`;
+- `GET /api/admin/draws/:lottery/health`;
+- `GET /api/suggestions/:lottery/latest`;
+- `GET/POST /api/saved-games`.
+
+## Verificação
+
+```bash
+npm run typecheck
+npm test
+npm run build
+docker compose config
+```
+
+O ciclo persistente das três modalidades usa exclusivamente um banco cujo nome
+termine em `_test`:
+
+```bash
+DATABASE_URL='postgresql://.../atlas_loto_test?options=-c%20role%3Datlas_app' \
+TEST_ADMIN_DATABASE_URL='postgresql://.../atlas_loto_test' \
+INTERNAL_ANALYTICS_URL='http://127.0.0.1:8001' \
+npm run test:integration -w @atlas/api
+```
+
+## Demonstração Cloudflare
+
+`apps/web` gera uma exportação estática sem persistência. Após autenticar uma conta que administre `nonato.me`, publique o domínio configurado:
+
+```bash
+cd apps/web
+npx wrangler login
+npm run deploy:cloudflare
+```
+
+## Demonstração no Hestia
+
+O build estático pode ser enviado por SFTP diretamente ao domínio:
+
+```bash
+npm run build -w @atlas/web
+sftp -P 22022 usuario@servidor
+# envie o conteúdo de apps/web/out para:
+# /home/usuario/web/smart.nonato.me/public_html
+```
+
+Consulte `docs/IMPLEMENTATION_PLAN.md`, `docs/ARCHITECTURE.md`, `docs/METHODOLOGY.md` e `docs/ACCEPTANCE_REPORT.md`.

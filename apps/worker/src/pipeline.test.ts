@@ -1,0 +1,1 @@
+import{describe,it,expect}from"vitest";import{jobKey,assertOrdered}from"./pipeline.js";describe("pipeline",()=>{it("has deterministic idempotency key",()=>expect(jobKey("mega",1,2,"v1","collect")).toBe(jobKey("mega",1,2,"v1","collect")));it("rejects out of order",()=>expect(()=>assertOrdered(10,12)).toThrow())});

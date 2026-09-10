@@ -1,0 +1,625 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SUPPORT
+  ADMIN
+}
+
+enum ConfirmationState {
+  PENDING
+  CONFIRMED
+  QUARANTINED
+}
+
+enum PrizeState {
+  PENDING
+  CONFIRMED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  REFUNDED
+}
+
+model User {
+  id              String           @id @default(uuid())
+  email           String           @unique
+  passwordHash    String
+  role            Role             @default(USER)
+  emailVerifiedAt DateTime?
+  suspendedAt     DateTime?
+  adminMfaSecretEncrypted String?
+  adminMfaEnabledAt DateTime?
+  adminMfaRecoveryHashes String[]           @default([])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  sessions        Session[]
+  preferences     UserPreferences?
+  savedGames      SavedGame[]
+  betRecords      BetRecord[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  adminMfaVerifiedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model EmailVerification {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model PasswordReset {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model UserPreferences {
+  id               String @id @default(uuid())
+  userId           String @unique
+  theme            String @default("system")
+  budgetLimitCents Int?
+  locale           String @default("pt-BR")
+  user             User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Plan {
+  id            String         @id @default(uuid())
+  code          String         @unique
+  name          String
+  limits        Json
+  active        Boolean        @default(true)
+  entitlements  Entitlement[]
+  subscriptions Subscription[]
+}
+
+model Entitlement {
+  id     String @id @default(uuid())
+  planId String
+  key    String
+  value  Json
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@unique([planId, key])
+}
+
+model Subscription {
+  id         String             @id @default(uuid())
+  userId     String
+  planId     String
+  provider   String
+  externalId String?            @unique
+  status     SubscriptionStatus
+  periodEnd  DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  plan       Plan               @relation(fields: [planId], references: [id])
+
+  @@index([userId, status])
+}
+
+model BillingEvent {
+  id             String    @id @default(uuid())
+  provider       String
+  externalId     String
+  payload        Json
+  signatureValid Boolean
+  processedAt    DateTime?
+  occurredAt     DateTime
+  createdAt      DateTime  @default(now())
+
+  @@unique([provider, externalId])
+}
+
+model UsageCounter {
+  id        String   @id @default(uuid())
+  userId    String
+  key       String
+  period    String
+  used      Int      @default(0)
+  limit     Int
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key, period])
+}
+
+model Lottery {
+  id         String               @id @default(uuid())
+  slug       String               @unique
+  name       String
+  active     Boolean              @default(true)
+  sourceLatestContest Int?
+  nextContestNumber Int?
+  nextDrawDate       DateTime?
+  estimatedPrizeCents BigInt?
+  sourceUpdatedAt    DateTime?
+  dataCoverage       Json?
+  freshnessStatus    String               @default("NO_RESULTS")
+  rules      LotteryRuleVersion[]
+  draws      Draw[]
+  snapshots  AnalysisSnapshot[]
+  strategies Strategy[]
+}
+
+model LotteryRuleVersion {
+  id         String    @id @default(uuid())
+  lotteryId  String
+  validFrom  DateTime
+  validTo    DateTime?
+  universe   Int
+  drawnCount Int
+  minPick    Int
+  maxPick    Int
+  luckyMonth Boolean
+  sourceUrl  String
+  metadata   Json
+  lottery    Lottery   @relation(fields: [lotteryId], references: [id])
+
+  @@unique([lotteryId, validFrom])
+}
+
+model Draw {
+  id                  String         @id @default(uuid())
+  lotteryId           String
+  contestNumber       Int
+  canonicalRevisionId String?
+  drawDate            DateTime
+  drawTime            String?
+  specialName         String?
+  createdAt           DateTime       @default(now())
+  lottery             Lottery        @relation(fields: [lotteryId], references: [id])
+  revisions           DrawRevision[]
+
+  @@unique([lotteryId, contestNumber])
+  @@index([lotteryId, drawDate])
+}
+
+model DrawRevision {
+  id            String            @id @default(uuid())
+  drawId        String
+  revision      Int
+  numbers       Int[]
+  originalOrder Int[]
+  luckyMonth    Int?
+  confirmation  ConfirmationState
+  prizeState    PrizeState        @default(PENDING)
+  sourceUrl     String
+  fetchedAt     DateTime
+  rawPayload    Json
+  payloadHash   String
+  parserVersion String
+  sourceVerifiedAt DateTime?
+  accumulated   Boolean?
+  supersededAt  DateTime?
+  createdAt     DateTime          @default(now())
+  draw          Draw              @relation(fields: [drawId], references: [id])
+  prizeTiers    PrizeTier[]
+  evaluations   GameEvaluation[]
+
+  @@unique([drawId, revision])
+  @@unique([drawId, payloadHash])
+}
+
+model PrizeTier {
+  id                 String       @id @default(uuid())
+  drawRevisionId     String
+  hits               Int
+  luckyMonthRequired Boolean      @default(false)
+  winners            Int?
+  amountCents        BigInt?
+  label              String
+  drawRevision       DrawRevision @relation(fields: [drawRevisionId], references: [id], onDelete: Cascade)
+
+  @@unique([drawRevisionId, label])
+}
+
+model SourceFetch {
+  id            String   @id @default(uuid())
+  lotterySlug   String
+  url           String
+  fetchedAt     DateTime
+  statusCode    Int?
+  payloadHash   String?
+  rawPayload    Json?
+  parserVersion String
+  error         String?
+}
+
+model ImportRun {
+  id              String    @id @default(uuid())
+  lotterySlug     String
+  format          String
+  checkpoint      Json
+  status          JobStatus
+  recordsRead     Int       @default(0)
+  recordsAccepted Int       @default(0)
+  sourceFileName  String?
+  sourceFileHash  String?
+  actorUserId     String?
+  preview         Json?
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+}
+
+model DataQualityIssue {
+  id            String    @id @default(uuid())
+  lotterySlug   String
+  contestNumber Int?
+  severity      String
+  code          String
+  details       Json
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([lotterySlug, resolvedAt])
+}
+
+model AnalysisSnapshot {
+  id            String             @id @default(uuid())
+  lotteryId     String
+  cutoffContest Int
+  datasetHash   String
+  version       String
+  status        String
+  windows       Int[]
+  metadata      Json
+  publishedAt   DateTime?
+  supersededAt  DateTime?
+  createdAt     DateTime           @default(now())
+  lottery       Lottery            @relation(fields: [lotteryId], references: [id])
+  numberStats   NumberStatistic[]
+  pairStats     PairStatistic[]
+  patternStats  PatternStatistic[]
+  batches       SuggestionBatch[]
+
+  @@unique([lotteryId, cutoffContest, datasetHash, version])
+}
+
+model NumberStatistic {
+  id          String           @id @default(uuid())
+  snapshotId  String
+  window      Int
+  number      Int
+  count       Int
+  frequency   Float
+  expected    Float
+  ema         Float
+  gap         Int?
+  uncertainty Json
+  snapshot    AnalysisSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, window, number])
+}
+
+model PairStatistic {
+  id         String           @id @default(uuid())
+  snapshotId String
+  window     Int
+  a          Int
+  b          Int
+  observed   Int
+  expected   Float
+  support    Float
+  deviation  Float
+  qValue     Float?
+  snapshot   AnalysisSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, window, a, b])
+}
+
+model PatternStatistic {
+  id             String           @id @default(uuid())
+  snapshotId     String
+  window         Int
+  key            String
+  value          Json
+  formulaVersion String
+  snapshot       AnalysisSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, window, key])
+}
+
+model Strategy {
+  id              String            @id @default(uuid())
+  lotteryId       String
+  code            String
+  name            String
+  activeVersionId String?
+  lottery         Lottery           @relation(fields: [lotteryId], references: [id])
+  versions        StrategyVersion[]
+
+  @@unique([lotteryId, code])
+}
+
+model StrategyVersion {
+  id         String            @id @default(uuid())
+  strategyId String
+  version    String
+  parameters Json
+  status     String
+  createdAt  DateTime          @default(now())
+  strategy   Strategy          @relation(fields: [strategyId], references: [id])
+  batches    SuggestionBatch[]
+
+  @@unique([strategyId, version])
+}
+
+model SuggestionBatch {
+  id                String           @id @default(uuid())
+  snapshotId        String
+  strategyVersionId String
+  userId            String?
+  targetContest     Int
+  seed              String
+  prng              String
+  constraints       Json
+  datasetHash       String
+  scoreVersion      String
+  status            String
+  requestKey        String?
+  previousBatchId   String?
+  createdAt         DateTime         @default(now())
+  publishedAt       DateTime?
+  snapshot          AnalysisSnapshot @relation(fields: [snapshotId], references: [id])
+  strategyVersion   StrategyVersion  @relation(fields: [strategyVersionId], references: [id])
+  games             SuggestedGame[]
+
+  @@index([userId, createdAt])
+  @@unique([userId, requestKey])
+}
+
+model SuggestedGame {
+  id                 String          @id @default(uuid())
+  batchId            String
+  numbers            Int[]
+  luckyMonth         Int?
+  score              Float?
+  scoreBreakdown     Json
+  estimatedCostCents Int?
+  batch              SuggestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  savedGames         SavedGame[]
+
+  @@unique([batchId, numbers, luckyMonth])
+}
+
+model SavedGame {
+  id              String                 @id @default(uuid())
+  userId          String
+  suggestedGameId String?
+  lotterySlug     String
+  numbers         Int[]
+  luckyMonth      Int?
+  name            String
+  tags            String[]
+  notes           String?
+  favorite        Boolean                @default(false)
+  archivedAt      DateTime?
+  createdAt       DateTime               @default(now())
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  suggestedGame   SuggestedGame?         @relation(fields: [suggestedGameId], references: [id])
+  revisions       GameRevision[]
+  tracking        TrackingSubscription[]
+  betRecords      BetRecord[]
+  evaluations     GameEvaluation[]
+
+  @@index([userId, lotterySlug, createdAt])
+}
+
+model GameRevision {
+  id          String    @id @default(uuid())
+  savedGameId String
+  numbers     Int[]
+  luckyMonth  Int?
+  reason      String
+  createdAt   DateTime  @default(now())
+  savedGame   SavedGame @relation(fields: [savedGameId], references: [id], onDelete: Cascade)
+}
+
+model TrackingSubscription {
+  id           String    @id @default(uuid())
+  savedGameId  String
+  startContest Int
+  endContest   Int?
+  active       Boolean   @default(true)
+  savedGame    SavedGame @relation(fields: [savedGameId], references: [id], onDelete: Cascade)
+}
+
+model BetRecord {
+  id                  String    @id @default(uuid())
+  userId              String
+  savedGameId         String
+  contestNumber       Int
+  declaredCostCents   Int?
+  registeredAt        DateTime
+  retroactive         Boolean
+  status              String
+  receivedAmountCents Int?
+  createdAt           DateTime  @default(now())
+  user                User      @relation(fields: [userId], references: [id])
+  savedGame           SavedGame @relation(fields: [savedGameId], references: [id])
+
+  @@unique([userId, savedGameId, contestNumber])
+}
+
+model GameEvaluation {
+  id                  String       @id @default(uuid())
+  savedGameId         String
+  drawRevisionId      String
+  numberHits          Int
+  luckyMonthHit       Boolean?
+  prizeTier           String?
+  officialAmountCents BigInt?
+  mode                String
+  createdAt           DateTime     @default(now())
+  savedGame           SavedGame    @relation(fields: [savedGameId], references: [id])
+  drawRevision        DrawRevision @relation(fields: [drawRevisionId], references: [id])
+
+  @@unique([savedGameId, drawRevisionId])
+}
+
+model Experiment {
+  id        String        @id @default(uuid())
+  name      String
+  protocol  Json
+  status    String
+  createdAt DateTime      @default(now())
+  runs      BacktestRun[]
+}
+
+model BacktestRun {
+  id              String           @id @default(uuid())
+  experimentId    String
+  strategyVersion String
+  datasetHash     String
+  seed            String
+  status          JobStatus
+  startedAt       DateTime         @default(now())
+  finishedAt      DateTime?
+  experiment      Experiment       @relation(fields: [experimentId], references: [id])
+  folds           BacktestFold[]
+  metrics         BacktestMetric[]
+}
+
+model BacktestFold {
+  id            String      @id @default(uuid())
+  runId         String
+  trainEnd      Int
+  validationEnd Int
+  testStart     Int
+  testEnd       Int
+  run           BacktestRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, testStart, testEnd])
+}
+
+model BacktestMetric {
+  id             String      @id @default(uuid())
+  runId          String
+  name           String
+  value          Float
+  confidenceLow  Float?
+  confidenceHigh Float?
+  sampleSize     Int
+  metadata       Json
+  run            BacktestRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, name])
+}
+
+model ProspectiveEvaluation {
+  id                String    @id @default(uuid())
+  suggestionBatchId String
+  contestNumber     Int
+  eligible          Boolean
+  eligibilityReason String
+  publishedAt       DateTime
+  resultKnownAt     DateTime?
+  metrics           Json?
+
+  @@unique([suggestionBatchId, contestNumber])
+}
+
+model OutboxEvent {
+  id             String    @id @default(uuid())
+  aggregateType  String
+  aggregateId    String
+  type           String
+  payload        Json
+  idempotencyKey String    @unique
+  createdAt      DateTime  @default(now())
+  publishedAt    DateTime?
+  attempts       Int       @default(0)
+
+  @@index([publishedAt, createdAt])
+}
+
+model JobRun {
+  id         String    @id @default(uuid())
+  queue      String
+  jobKey     String
+  version    String
+  status     JobStatus
+  checkpoint Json?
+  attempts   Int       @default(0)
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([queue, jobKey, version])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  type      String
+  payload   Json
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model NotificationPreference {
+  id          String    @id @default(uuid())
+  userId      String
+  channel     String
+  type        String
+  enabled     Boolean   @default(false)
+  pausedUntil DateTime?
+
+  @@unique([userId, channel, type])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorUserId  String?
+  action       String
+  resourceType String
+  resourceId   String?
+  ipHash       String?
+  metadata     Json
+  createdAt    DateTime @default(now())
+  actor        User?    @relation(fields: [actorUserId], references: [id])
+
+  @@index([resourceType, resourceId, createdAt])
+}
