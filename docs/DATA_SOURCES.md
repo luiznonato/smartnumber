@@ -12,21 +12,38 @@ Nenhuma interface de resultados foi tratada como API pública documentada. A cob
 ## Interface operacional observada
 
 Em 2026-09-10 foi validada a resposta JSON de
-`https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena`. O host pertence
-ao domínio CAIXA, mas a interface não possui documentação pública, contrato ou
-SLA encontrados. O adaptador `CaixaServiceBusProvider` usa caminhos fixos para
-Mega-Sena, Lotofácil e Dia de Sorte, timeout, tentativas limitadas e parser
-versionado. Não aceita URL fornecida pelo usuário.
+`https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena`,
+`.../lotofacil` e `.../diadesorte`. O host pertence ao domínio CAIXA, mas a
+interface não possui documentação pública, contrato ou SLA encontrados. Portanto
+ela é descrita como “interface operacional do portal CAIXA”, não como API pública
+oficial. O adaptador `CaixaServiceBusProvider` usa somente caminhos fixos,
+timeout, limite de 2 MB, retry apenas para 408/429/5xx, atraso configurável e
+parser `caixa-portal-servicebus-v2`. Não aceita URL fornecida pelo usuário.
+
+Campos normalizados:
+
+- identidade, data, dezenas ordenadas e ordem de extração quando publicada;
+- Mês da Sorte em nome português ou número de 1 a 12;
+- faixas, ganhadores e valor por ganhador em centavos;
+- próximo concurso, data e estimativa quando publicados;
+- URL efetivamente consultada, instante, payload bruto, SHA-256 e parser.
+
+Rateio ausente permanece `PENDING`; não vira zero. Valor zero só é persistido
+quando o campo existe no payload. A modalidade e o número solicitado são
+conferidos antes da persistência.
 
 A validação de conteúdo ocorreu pelo coletor web isolado. Requisições originadas
 diretamente desta VM receberam HTTP 403, inclusive com cabeçalhos de navegador.
-Portanto a sincronização externa não foi declarada operacional neste runtime; o
-endpoint administrativo responde 502 e o importador JSON continua sendo a
-alternativa controlada.
+Portanto a sincronização externa não foi declarada operacional neste runtime; os
+endpoints administrativos respondem 502, registram a tentativa em `SourceFetch`
+e o importador JSON continua sendo a alternativa controlada. Em hosts aceitos
+pela origem, habilite explicitamente `CAIXA_ENABLED=true`.
 
-A sincronização do último concurso persiste payload bruto e revisão. Se houver
-lacuna entre os concursos locais, registra `HISTORY_GAP` e bloqueia a publicação
-automática de nova análise. Isso não torna a cobertura histórica completa.
+A sincronização histórica é reiniciável via `ImportRun`, limitada a 100 concursos
+por chamada e sequencial para respeitar a origem. Se houver lacuna entre os
+concursos locais, registra `HISTORY_GAP` e bloqueia a publicação automática. A
+saúde compara o primeiro/último concurso e as lacunas com o último concurso
+observado na origem; continuidade parcial não é rotulada como cobertura completa.
 
 ## Fixtures de regressão
 

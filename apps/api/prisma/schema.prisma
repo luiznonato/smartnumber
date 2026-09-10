@@ -160,6 +160,11 @@ model Lottery {
   slug       String               @unique
   name       String
   active     Boolean              @default(true)
+  sourceLatestContest Int?
+  nextContestNumber Int?
+  nextDrawDate       DateTime?
+  estimatedPrizeCents BigInt?
+  sourceUpdatedAt    DateTime?
   rules      LotteryRuleVersion[]
   draws      Draw[]
   snapshots  AnalysisSnapshot[]

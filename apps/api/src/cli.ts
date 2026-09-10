@@ -44,7 +44,7 @@ async function databaseCommand() {
         const ordered = rows
           .map((payload) => ({
             payload,
-            input: provider.normalize(lottery(), payload),
+            input: provider.normalize(lottery(), payload).input,
           }))
           .sort((a, b) => a.input.contestNumber - b.input.contestNumber);
         const resumed = options.resume
@@ -122,6 +122,15 @@ async function databaseCommand() {
       }
       case "sync-result":
         return await flow.syncLatest(lottery());
+      case "sync-history":
+        return await flow.syncHistoryBatch(lottery(), {
+          startContest: options.start
+            ? integer("start")
+            : undefined,
+          endContest: options.end ? integer("end") : undefined,
+          limit: integer("limit", 25),
+          resumeId: options.resume,
+        });
       case "snapshot":
         return await flow.recalculate(lottery());
       case "evaluate-games":
@@ -160,6 +169,7 @@ async function main() {
         "generate",
         "import-history",
         "sync-result",
+        "sync-history",
         "snapshot",
         "backtest",
         "evaluate-games",

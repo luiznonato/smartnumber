@@ -1,6 +1,14 @@
 import { PrismaClient } from "@prisma/client";
 import { RULES, type LotterySlug } from "@atlas/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { AuthService } from "./auth.service.js";
 import { PrismaService } from "./database.js";
 import { CaixaServiceBusProvider } from "./ingestion.js";
@@ -28,6 +36,11 @@ suite("persistent official-result lifecycle", () => {
       throw new Error("DATABASE_URL de integração deve apontar para banco *_test");
     }
     await admin.$connect();
+    await prisma.onModuleInit();
+    process.env.CAIXA_ENABLED = "true";
+  }, 30_000);
+
+  beforeEach(async () => {
     await admin.$executeRawUnsafe(`
       DO $$
       DECLARE row RECORD;
@@ -41,12 +54,12 @@ suite("persistent official-result lifecycle", () => {
         END LOOP;
       END $$;
     `);
-    await prisma.onModuleInit();
   }, 30_000);
 
   afterAll(async () => {
     await prisma.onModuleDestroy();
     await admin.$disconnect();
+    delete process.env.CAIXA_ENABLED;
   });
 
   it.each(Object.keys(OFFICIAL_LIFECYCLE_FIXTURES) as LotterySlug[])(
@@ -54,7 +67,7 @@ suite("persistent official-result lifecycle", () => {
     async (lottery) => {
       const fixtures = OFFICIAL_LIFECYCLE_FIXTURES[lottery];
       const normalized = fixtures.map((fixture) =>
-        provider.normalize(lottery, fixture),
+        provider.normalize(lottery, fixture).input,
       );
       const subscriber = await auth.register(
         `${lottery}-${crypto.randomUUID()}@integration.test`,
@@ -125,4 +138,76 @@ suite("persistent official-result lifecycle", () => {
     },
     60_000,
   );
+
+  it("synchronizes official history in resumable audited batches", async () => {
+    const fixtures = OFFICIAL_LIFECYCLE_FIXTURES["dia-de-sorte"];
+    const officialThird = {
+      ...fixtures[2],
+      numeroConcursoProximo: 4,
+      dataProximoConcurso: "26/05/2018",
+      valorEstimadoProximoConcurso: 500000,
+      listaRateioPremio: [
+        {
+          descricaoFaixa: "7 acertos",
+          numeroDeGanhadores: 1,
+          valorPremio: 769663.08,
+        },
+        {
+          descricaoFaixa: "Mês da Sorte",
+          numeroDeGanhadores: 237328,
+          valorPremio: 2,
+        },
+      ],
+    };
+    const latest = provider.normalize("dia-de-sorte", officialThird);
+    vi.spyOn(CaixaServiceBusProvider.prototype, "latest").mockResolvedValue(
+      latest,
+    );
+    vi.spyOn(
+      CaixaServiceBusProvider.prototype,
+      "byContest",
+    ).mockImplementation(async (_lottery, contest) =>
+      provider.normalize(
+        "dia-de-sorte",
+        contest === 3 ? officialThird : fixtures[contest - 1],
+      ),
+    );
+
+    const firstBatch = await flow.syncHistoryBatch("dia-de-sorte", {
+      limit: 2,
+    });
+    expect(firstBatch.completed).toBe(false);
+    expect(firstBatch.nextContest).toBe(3);
+
+    const finalBatch = await flow.syncHistoryBatch("dia-de-sorte", {
+      resumeId: firstBatch.importRunId,
+      limit: 2,
+    });
+    expect(finalBatch.completed).toBe(true);
+
+    const health = await flow.dataHealth("dia-de-sorte");
+    expect(health).toMatchObject({
+      confirmedDraws: 3,
+      firstContest: 1,
+      lastContest: 3,
+      nextContestNumber: 4,
+      complete: true,
+      gaps: [],
+    });
+    expect(await admin.sourceFetch.count()).toBe(4);
+    const thirdDraw = await admin.draw.findFirstOrThrow({
+      where: {
+        lottery: { slug: "dia-de-sorte" },
+        contestNumber: 3,
+      },
+      include: {
+        revisions: { include: { prizeTiers: true } },
+      },
+    });
+    const canonical = thirdDraw.revisions.find(
+      (revision) => revision.id === thirdDraw.canonicalRevisionId,
+    );
+    expect(canonical?.prizeState).toBe("CONFIRMED");
+    expect(canonical?.prizeTiers).toHaveLength(2);
+  });
 });

@@ -28,6 +28,7 @@ npm run db:seed
 npm run cli -- generate lottery=mega-sena count=3 seed=aceite
 npm run cli -- import-history lottery=mega-sena file=/caminho/oficial.json
 npm run cli -- sync-result lottery=mega-sena
+npm run cli -- sync-history lottery=mega-sena limit=25
 npm run cli -- snapshot lottery=mega-sena
 npm run cli -- backtest lottery=mega-sena
 npm run cli -- evaluate-games lottery=mega-sena contest=0
@@ -43,8 +44,10 @@ npm run cli -- import-history lottery=mega-sena \
   file=/caminho/oficial.json resume=uuid-do-import-run
 ```
 
-`sync-result` falha de modo seguro quando a origem CAIXA bloqueia o servidor.
-Nenhum desses comandos cria resultados fictícios.
+`sync-result` e `sync-history` exigem `CAIXA_ENABLED=true`. A sincronização
+histórica processa no máximo 100 concursos por chamada e retorna `importRunId`;
+continue com `resume=<uuid>`. Ela falha de modo seguro quando o portal CAIXA
+bloqueia o servidor. Nenhum desses comandos cria resultados fictícios.
 
 Endpoints integrados disponíveis após subir API, analytics e banco:
 
@@ -52,6 +55,8 @@ Endpoints integrados disponíveis após subir API, analytics e banco:
 - `POST /api/admin/auth/login`;
 - `POST /api/admin/draws/import`;
 - `POST /api/admin/draws/:lottery/sync-latest`;
+- `POST /api/admin/draws/:lottery/sync-history`;
+- `GET /api/admin/draws/:lottery/health`;
 - `GET /api/suggestions/:lottery/latest`;
 - `GET/POST /api/saved-games`.
 

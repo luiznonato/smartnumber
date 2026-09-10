@@ -1,4 +1,5 @@
 import { SessionArea } from "../session-area";
+import { CaixaSync } from "./caixa-sync";
 import { ImportDraw } from "./import-draw";
 
 export default function AdminPage() {
@@ -7,6 +8,7 @@ export default function AdminPage() {
       <p className="eyebrow">Administração</p>
       <h1>Painel operacional</h1>
       <SessionArea admin />
+      <CaixaSync />
       <ImportDraw />
     </>
   );

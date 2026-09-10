@@ -45,6 +45,34 @@ export class AdminDrawController {
     await this.auth.authenticate(request, Role.ADMIN);
     return this.flow.syncLatest(lotterySlugSchema.parse(lottery));
   }
+
+  @Post(":lottery/sync-history")
+  async syncHistory(
+    @Req() request: FastifyRequest,
+    @Param("lottery") lottery: string,
+    @Body()
+    body: {
+      startContest?: number;
+      endContest?: number;
+      limit?: number;
+      resumeId?: string;
+    },
+  ) {
+    await this.auth.authenticate(request, Role.ADMIN);
+    return this.flow.syncHistoryBatch(
+      lotterySlugSchema.parse(lottery),
+      body,
+    );
+  }
+
+  @Get(":lottery/health")
+  async health(
+    @Req() request: FastifyRequest,
+    @Param("lottery") lottery: string,
+  ) {
+    await this.auth.authenticate(request, Role.ADMIN);
+    return this.flow.dataHealth(lotterySlugSchema.parse(lottery));
+  }
 }
 
 @Controller("suggestions")
