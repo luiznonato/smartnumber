@@ -23,7 +23,7 @@ Serviços: web `:3000`, API/OpenAPI `:3001/docs`, analytics interno `:8001` e wo
 ## Banco e comandos
 
 ```bash
-npm run db:migrate
+DATABASE_URL="$MIGRATION_DATABASE_URL" npm run db:migrate
 npm run db:seed
 npm run cli -- generate lottery=mega-sena count=3 seed=aceite
 npm run cli -- import-history lottery=mega-sena file=/caminho/oficial.json
@@ -34,6 +34,15 @@ npm run cli -- evaluate-games lottery=mega-sena contest=0
 ```
 
 Os cinco últimos comandos falham de modo seguro até `DATABASE_URL` e arquivo/fonte oficial estarem configurados; não criam dados fictícios. Essa limitação está registrada em `docs/STATUS.md`.
+
+Endpoints integrados disponíveis após subir API, analytics e banco:
+
+- `POST /api/auth/register` e `POST /api/auth/login`;
+- `POST /api/admin/auth/login`;
+- `POST /api/admin/draws/import`;
+- `POST /api/admin/draws/:lottery/sync-latest`;
+- `GET /api/suggestions/:lottery/latest`;
+- `GET/POST /api/saved-games`.
 
 ## Verificação
 

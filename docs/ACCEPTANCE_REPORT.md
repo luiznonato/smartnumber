@@ -4,15 +4,29 @@
 
 Contratos e regras; geração uniforme reproduzível; conferência do mês independente; validação de ingestão; fórmulas hipergeométrica/par; prevenção de leakage no backtest; autenticação criptográfica; quota idempotente; billing fail-closed; pipeline BullMQ; interface responsiva.
 
-Executado em 2026-09-10: typecheck TypeScript; 17 testes Vitest; 6 testes pytest; build de API, web e worker; geração Prisma; CLI uniforme; auditoria npm (zero vulnerabilidades); benchmark sintético de 3.000 concursos em 0,012 s e pico RSS de 95.756 KiB neste host. O benchmark não mede produção nem usa histórico oficial.
+Executado em 2026-09-10: typecheck TypeScript; testes Vitest e pytest; build de API, web e worker; geração Prisma; auditoria npm; benchmark sintético de 3.000 concursos em 0,012 s e pico RSS de 95.756 KiB neste host. O benchmark não mede produção nem usa histórico oficial.
+
+Também foram executados em PostgreSQL e Redis isolados:
+
+- quatro migrations aplicadas e reaplicação idempotente;
+- conexão da API sob `atlas_app`, role sem `BYPASSRLS`;
+- teste com dois usuários: a consulta de A visualizou uma linha de A e nenhuma de B;
+- cadastro e sessão persistentes;
+- importação isolada dos concursos iniciais 1–3 da Mega-Sena;
+- cálculo via FastAPI, snapshot e lote com dataset hash;
+- salvamento imutável de uma sugestão;
+- importação do concurso seguinte, conferência do jogo original com 1 acerto;
+- novo lote ligado ao lote anterior por `previousBatchId`;
+- replay do mesmo resultado sem duplicar revisão e recuperando a avaliação;
+- build das quatro imagens Docker (`api`, `worker`, `web`, `analytics`).
 
 ## Implementado sem verificação externa
 
-Schema e migrations PostgreSQL/RLS, Compose/Caddy, OpenAPI e imagens. O runtime Docker não existe neste host, portanto o smoke Compose e a restauração não foram executados.
+As imagens e os serviços de banco foram exercitados localmente. A restauração de backup e o Compose completo com proxy não foram executados.
 
 ## Pendente externo
 
-Histórico oficial real e cobertura; endpoint/licença/limites da CAIXA; regras detalhadas e preços por vigência; billing real; SMTP; RLS com roles; backup externo/restauração; VPS/TLS; revisão jurídica.
+Importação e reconciliação de todo o histórico oficial; estabilidade/licença/limites da interface CAIXA; preços e premiações por vigência; billing real; SMTP; backup externo/restauração; backend na VPS; revisão jurídica.
 
 ## Resultado estatístico
 
