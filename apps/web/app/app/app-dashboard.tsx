@@ -51,7 +51,17 @@ export function AppDashboard() {
   }
 
   useEffect(() => {
-    void load();
+    Promise.all([
+      fetch("/api/suggestions/mega-sena/latest").then((response) =>
+        response.ok ? response.json() : null,
+      ),
+      fetch("/api/saved-games", { credentials: "include" }).then((response) =>
+        response.ok ? response.json() : [],
+      ),
+    ]).then(([suggestions, games]) => {
+      setBatch(suggestions);
+      setSaved(games);
+    });
   }, []);
 
   async function save(suggestedGameId: string) {
