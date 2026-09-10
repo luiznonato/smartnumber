@@ -54,4 +54,15 @@ npx wrangler login
 npm run deploy:cloudflare
 ```
 
+## Demonstração no Hestia
+
+O build estático pode ser enviado por SFTP diretamente ao domínio:
+
+```bash
+npm run build -w @atlas/web
+sftp -P 22022 usuario@servidor
+# envie o conteúdo de apps/web/out para:
+# /home/usuario/web/smart.nonato.me/public_html
+```
+
 Consulte `docs/IMPLEMENTATION_PLAN.md`, `docs/ARCHITECTURE.md`, `docs/METHODOLOGY.md` e `docs/ACCEPTANCE_REPORT.md`.
