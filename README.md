@@ -44,4 +44,14 @@ npm run build
 docker compose config
 ```
 
+## Demonstração Cloudflare
+
+`apps/web` gera uma exportação estática sem persistência. Após autenticar uma conta que administre `nonato.me`, publique o domínio configurado:
+
+```bash
+cd apps/web
+npx wrangler login
+npm run deploy:cloudflare
+```
+
 Consulte `docs/IMPLEMENTATION_PLAN.md`, `docs/ARCHITECTURE.md`, `docs/METHODOLOGY.md` e `docs/ACCEPTANCE_REPORT.md`.

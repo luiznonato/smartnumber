@@ -2,6 +2,12 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "atlas-loto-demo",
   "compatibility_date": "2026-09-10",
+  "routes": [
+    {
+      "pattern": "smart.nonato.me",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./out",
     "not_found_handling": "404-page"
