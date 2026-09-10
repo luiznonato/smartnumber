@@ -1,0 +1,1 @@
+import{Card}from"@atlas/ui";export default function Page(){return<><p className="eyebrow">Meus jogos</p><h1>Combinações imutáveis</h1><Card><p>Jogos salvos, revisões, acompanhamento e apostas declaradas são entidades separadas.</p><p className="muted">Uma aposta declarada foi realizada fora da plataforma e não é comprovada pela CAIXA.</p></Card></>}

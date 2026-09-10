@@ -1,0 +1,1 @@
+import {Module} from "@nestjs/common";import {HealthController,LotteryController,GameController,MethodologyController} from "./controllers.js";import {LotteryService,GameService} from "./services.js";@Module({controllers:[HealthController,LotteryController,GameController,MethodologyController],providers:[LotteryService,GameService]})export class AppModule{}

@@ -1,0 +1,1 @@
+console.log("Seed de produção não cria resultados fictícios. Use importador oficial validado.");

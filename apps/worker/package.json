@@ -1,0 +1,1 @@
+{"name":"@atlas/worker","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"tsx watch src/main.ts","build":"tsc","start":"node dist/main.js","typecheck":"tsc --noEmit","test":"vitest run"},"dependencies":{"bullmq":"6.3.4","ioredis":"5.7.0","zod":"4.1.5"},"devDependencies":{"@types/node":"24.3.1","tsx":"4.20.5","typescript":"5.9.2","vitest":"3.2.4"}}

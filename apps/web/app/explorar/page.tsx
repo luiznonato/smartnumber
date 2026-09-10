@@ -1,0 +1,1 @@
+import{Card}from"@atlas/ui";export default function Page(){return<><p className="eyebrow">Explorar</p><h1>Histórico e distribuições</h1><Card><h2>Dados ainda não importados</h2><p className="muted">Após reconciliar uma fonte oficial, esta área mostra frequências, intervalos, pares e distribuições com n, janela, fórmula e lacunas.</p></Card></>}
