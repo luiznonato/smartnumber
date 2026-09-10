@@ -16,8 +16,16 @@ RLS para todas as entidades privadas; publicar o backend na VPS; SMTP, billing,
 backup e restauração.
 
 O CLI agora importa arrays de payloads oficiais em ordem, registra progresso em
-`ImportRun` e retoma pelo UUID do checkpoint. Ainda faltam paginação remota,
-limite de requisições e reconciliação de cobertura total.
+`ImportRun` e retoma pelo UUID do checkpoint. A sincronização remota também usa
+lotes, atraso configurável e reconciliação de lacunas; a cobertura total ainda
+depende de executar todos os lotes em um host aceito pela origem.
+
+A interface JSON do portal CAIXA está integrada atrás de `CAIXA_ENABLED`.
+Sincroniza o último concurso ou histórico em lotes de até 100, preservando
+payload/hash/origem, premiação e próximo concurso. O painel administrativo expõe
+sincronização, retomada e cobertura. O teste persistente de retomada passou; a
+requisição real desta VM continua bloqueada com HTTP 403 e foi auditada em
+`SourceFetch`.
 
 O pós-importação agora é assíncrono: a API grava revisão+outbox, o worker consome
 em ordem, chama um endpoint interno autenticado e marca publicação apenas após o

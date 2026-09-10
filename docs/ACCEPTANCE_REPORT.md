@@ -39,6 +39,21 @@ API e worker foram iniciados contra PostgreSQL/Redis isolados; o worker consumiu
 os nove eventos `draw.confirmed` pendentes em ordem, obteve respostas idempotentes
 do endpoint interno e reduziu a zero a contagem de eventos sem `publishedAt`.
 
+## Integração com o portal CAIXA
+
+Em 2026-09-10, respostas atuais das três modalidades foram verificadas pelo
+coletor web isolado no domínio `servicebus2.caixa.gov.br`. A nova integração foi
+testada com quatro testes persistentes: três ciclos de modalidade e um histórico
+do Dia de Sorte em dois lotes retomáveis. O teste confirmou quatro `SourceFetch`,
+cobertura contínua 1–3, metadados do próximo concurso e duas faixas de prêmio
+persistidas.
+
+A quinta migration foi aplicada em banco novo e no banco local existente. Uma
+requisição real originada pela VM recebeu HTTP 403, conforme a limitação já
+observada. A aplicação retornou falha, não persistiu resultado e registrou
+`statusCode=403`, URL e erro em `SourceFetch`. Isso valida o modo seguro, não a
+disponibilidade da origem para a VPS final.
+
 ## Implementado sem verificação externa
 
 As imagens e os serviços de banco foram exercitados localmente. A restauração de backup e o Compose completo com proxy não foram executados.
