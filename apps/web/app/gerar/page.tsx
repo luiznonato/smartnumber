@@ -151,14 +151,18 @@ export default function Generate() {
       if (!response.ok) throw new Error("Não foi possível consultar a base.");
       const result: Options = await response.json();
       setOptions(result);
-      const current = result.strategies.find((item) => item.id === strategy);
-      if (!current?.available) setStrategy("uniform");
+      setStrategy((currentStrategy) => {
+        const current = result.strategies.find(
+          (item) => item.id === currentStrategy,
+        );
+        return current?.available ? currentStrategy : "uniform";
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
-  }, [lottery, strategy]);
+  }, [lottery]);
 
   useEffect(() => {
     void loadOptions();

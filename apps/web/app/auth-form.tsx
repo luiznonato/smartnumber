@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Card } from "@atlas/ui";
 
 export function AuthForm({
@@ -10,6 +11,7 @@ export function AuthForm({
   admin?: boolean;
   register?: boolean;
 }) {
+  const router = useRouter();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [challenge, setChallenge] = useState("");
@@ -64,7 +66,8 @@ export function AuthForm({
       setBusy(false);
       return;
     }
-    window.location.assign(admin ? "/admin" : "/app");
+    router.push(admin ? "/admin" : "/app");
+    router.refresh();
   }
 
   if (recoveryCodes.length) {
@@ -81,7 +84,12 @@ export function AuthForm({
             </li>
           ))}
         </ul>
-        <Button onClick={() => window.location.assign("/admin")}>
+        <Button
+          onClick={() => {
+            router.push("/admin");
+            router.refresh();
+          }}
+        >
           Concluir acesso
         </Button>
       </Card>

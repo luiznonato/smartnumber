@@ -38,6 +38,7 @@ services:
     environment: {API_URL: http://api:3001, NEXT_PUBLIC_APP_NAME: "${APP_NAME:-Atlas Loto}"}
     depends_on: [api]
     expose: ["8080"]
+    ports: ["127.0.0.1:8080:8080"]
     networks: [internal]
   proxy:
     image: caddy:2.10.2-alpine
