@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { hashPassword, issueSession, verifyPassword } from "./auth.js";
 import { PrismaService } from "./database.js";
@@ -23,9 +23,15 @@ export class AuthService {
       throw new ConflictException("E-mail já cadastrado");
     }
     const passwordHash = await hashPassword(password);
-    const user = await this.prisma.user.create({
-      data: { email, passwordHash, preferences: { create: {} } },
-      select: { id: true, email: true, role: true },
+    const id = randomUUID();
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: { id, email, passwordHash },
+        select: { id: true, email: true, role: true },
+      });
+      await tx.$executeRaw`SELECT set_config('app.user_id', ${id}, true)`;
+      await tx.userPreferences.create({ data: { userId: id } });
+      return created;
     });
     return { user, ...(await this.createSession(user.id)) };
   }
