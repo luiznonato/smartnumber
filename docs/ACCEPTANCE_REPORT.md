@@ -1,67 +1,81 @@
 # Relatório de aceite
 
-## Implementado e testável localmente
+## Jornada funcional observada
 
-Contratos e regras; geração uniforme reproduzível; conferência do mês independente; validação de ingestão; fórmulas hipergeométrica/par; prevenção de leakage no backtest; autenticação criptográfica; quota idempotente; billing fail-closed; pipeline BullMQ; interface responsiva.
+Em 2026-09-10, o smoke local integrado executou cadastro com cookie de sessão,
+geração de dois jogos Mega-Sena por `uniform-v2`, salvamento de uma sugestão e
+nova leitura após outra requisição. O retorno observado foi
+`{"status":"ok","latestHttp":200,"generated":2,"saved":1}`.
 
-Executado em 2026-09-10: typecheck TypeScript; testes Vitest e pytest; build de API, web e worker; geração Prisma; auditoria npm; benchmark sintético de 3.000 concursos em 0,012 s e pico RSS de 95.756 KiB neste host. O benchmark não mede produção nem usa histórico oficial.
+A suite persistente executou sete cenários em PostgreSQL/Redis: ciclo
+resultado → snapshot → sugestão → jogo salvo → resultado seguinte → conferência
+→ lote sucessor nas três modalidades; histórico CAIXA retomável; MFA
+administrativo; isolamento RLS entre dois usuários, quota/idempotência; e
+prévia/confirmação idempotente de CSV. Fixtures oficiais capturadas são
+identificadas como fixtures e não representam cobertura histórica completa.
 
-Também foram executados em PostgreSQL e Redis isolados:
+## Geração e explicações
 
-- quatro migrations aplicadas e reaplicação idempotente;
-- conexão da API sob `atlas_app`, role sem `BYPASSRLS`;
-- teste com dois usuários: a consulta de A visualizou uma linha de A e nenhuma de B;
-- cadastro e sessão persistentes;
-- importação isolada dos concursos iniciais 1–3 da Mega-Sena;
-- cálculo via FastAPI, snapshot e lote com dataset hash;
-- salvamento imutável de uma sugestão;
-- importação do concurso seguinte, conferência do jogo original com 1 acerto;
-- novo lote ligado ao lote anterior por `previousBatchId`;
-- replay do mesmo resultado sem duplicar revisão e recuperando a avaliação;
-- build das quatro imagens Docker (`api`, `worker`, `web`, `analytics`).
+- `uniform-v2`: amostragem uniforme sem reposição, seed persistida e sem score;
+- `recent-frequency-v2`: frequência suavizada, mínimo de 10 concursos;
+- `historical-profile-v1`: soma, paridade, faixas e interseção, mínimo de 25;
+- `diversified-v1`: seleção de carteira por interseção Jaccard;
+- indisponibilidade da API não aciona gerador local;
+- estratégia histórica insuficiente ou desatualizada é bloqueada ou marcada
+  explicitamente como simulação;
+- nenhum teste demonstrou vantagem estatística sobre o aleatório.
 
-Em seguida, o ciclo persistente foi automatizado em banco isolado
-`atlas_loto_test` para as três modalidades. As três execuções usam os concursos
-oficiais 1–3 registrados como fixtures: importam 1–2, calculam pelo FastAPI,
-salvam uma sugestão, importam o concurso 3, conferem o jogo imutável e publicam
-um lote sucessor vinculado. O teste do Dia de Sorte também verifica geração do
-mês com seed separada e sua conferência independente. Resultado executado:
-1 arquivo, 3 testes aprovados.
+As fórmulas e limitações estão em `docs/METHODOLOGY.md`; a lógica substituída
+está em `docs/CURRENT_GENERATION_AUDIT.md`.
 
-Os comandos CLI persistentes deixaram de ser placeholders. Foram executados
-contra o banco de teste: reconferência do concurso 3 do Dia de Sorte, novo
-snapshot/lote da Lotofácil e backtest walk-forward da Mega-Sena com duas seeds.
-Esse backtest usa apenas três concursos para validar o encadeamento técnico; não
-tem amostra suficiente para qualquer conclusão de desempenho.
+## Dados e fonte
 
-O pós-importação foi retirado da conexão HTTP administrativa. Em teste integrado,
-API e worker foram iniciados contra PostgreSQL/Redis isolados; o worker consumiu
-os nove eventos `draw.confirmed` pendentes em ordem, obteve respostas idempotentes
-do endpoint interno e reduziu a zero a contagem de eventos sem `publishedAt`.
+O endpoint do último resultado escolhe o maior concurso canônico, preserva cache
+em falhas e separa atualização da data de importação. A compatibilidade com dados
+anteriores foi testada: um concurso canônico legado deixou de aparecer como
+`NO_RESULTS`, passou a `UNVERIFIED`, e a cobertura calculada retornou concursos
+1–3 sem afirmar reconciliação com a fonte.
 
-## Integração com o portal CAIXA
+A interface JSON do portal CAIXA é não documentada. A requisição desta VM recebeu
+HTTP 403 e foi auditada em `SourceFetch`; isso não valida disponibilidade na VPS.
+O importador administrativo CSV/JSON está funcional, mas o histórico oficial
+completo não foi importado.
 
-Em 2026-09-10, respostas atuais das três modalidades foram verificadas pelo
-coletor web isolado no domínio `servicebus2.caixa.gov.br`. A nova integração foi
-testada com quatro testes persistentes: três ciclos de modalidade e um histórico
-do Dia de Sorte em dois lotes retomáveis. O teste confirmou quatro `SourceFetch`,
-cobertura contínua 1–3, metadados do próximo concurso e duas faixas de prêmio
-persistidas.
+## Segurança e persistência
 
-A quinta migration foi aplicada em banco novo e no banco local existente. Uma
-requisição real originada pela VM recebeu HTTP 403, conforme a limitação já
-observada. A aplicação retornou falha, não persistiu resultado e registrou
-`statusCode=403`, URL e erro em `SourceFetch`. Isso valida o modo seguro, não a
-disponibilidade da origem para a VPS final.
+Cadastro/login, logout, expiração/revogação, verificação de e-mail e recuperação
+de senha usam PostgreSQL. O backend deriva o usuário da sessão. RLS foi exercida
+com a role `atlas_app` sem `BYPASSRLS`; A não leu nem alterou jogos de B.
+Administrador exige senha e MFA TOTP ou código de recuperação. Cadastro público
+não cria admin, suspensão revoga sessões e ações são auditadas.
 
-## Implementado sem verificação externa
+## Interface
 
-As imagens e os serviços de banco foram exercitados localmente. A restauração de backup e o Compose completo com proxy não foram executados.
+Inspeção manual confirmou geração e salvamento em desktop, foco visível e
+navegação por teclado. Em viewports medidos de 390 e 360 CSS px,
+`scrollWidth == innerWidth`; a navegação inferior apareceu, a navegação desktop
+foi ocultada e quinze dezenas da Lotofácil quebraram em linhas. Não foram
+encontrados dados fictícios ou fallback de sucesso quando a API falha.
 
-## Pendente externo
+## Verificações executadas
 
-Importação e reconciliação de todo o histórico oficial; estabilidade/licença/limites da interface CAIXA; preços e premiações por vigência; billing real; SMTP; backup externo/restauração; backend na VPS; revisão jurídica.
+- `npm run db:generate`, `npm run lint`, `npm run typecheck`;
+- 27 testes API, 2 worker, 2 contratos e 10 analytics;
+- 7 testes integrados persistentes;
+- 7 migrations aplicadas do zero em `atlas_loto_migration_test`;
+- build das imagens `api`, `worker`, `web` e `analytics`;
+- `npm audit --audit-level=high`: 0 vulnerabilidades;
+- backup custom e restauração isolada: 1 concurso e 1 revisão preservados.
 
-## Resultado estatístico
+## Deploy e pendências
 
-Nenhum backtest com dados reais foi executado. Portanto não há evidência de vantagem sobre o acaso. Fixtures sintéticas não autorizam conclusão comercial.
+O Caddy está sob profile `standalone-proxy`; o Compose padrão não ocupa 80/443
+do Hestia. As imagens e healthchecks individuais iniciaram, mas a bridge Docker
+desta VM bloqueou tráfego entre containers, portanto a rede Compose completa
+não foi declarada validada. O smoke funcional usou serviços equivalentes
+expostos somente em loopback.
+
+`smart.nonato.me` continua sendo o demo estático anterior. O acesso disponível é
+SFTP sem shell, insuficiente para migrations, containers, worker e include do
+Nginx. Também permanecem externos: histórico completo, SMTP, billing, backup
+externo e revisão jurídica.

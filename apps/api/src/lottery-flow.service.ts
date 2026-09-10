@@ -597,9 +597,14 @@ export class LotteryFlowService {
     const revision = draw.revisions.find(
       (candidate) => candidate.id === draw.canonicalRevisionId,
     )!;
+    const coverage = await this.dataHealth(slug);
+    const state =
+      lottery.freshnessStatus === "NO_RESULTS"
+        ? "UNVERIFIED"
+        : lottery.freshnessStatus;
     return {
       lottery: slug,
-      state: lottery.freshnessStatus,
+      state,
       sourceLatestContest: lottery.sourceLatestContest,
       draw: {
         contestNumber: draw.contestNumber,
@@ -626,7 +631,7 @@ export class LotteryFlowService {
         estimatedPrizeCents:
           lottery.estimatedPrizeCents?.toString() ?? null,
       },
-      coverage: lottery.dataCoverage,
+      coverage,
       lastVerification: lastVerification
         ? {
             fetchedAt: lastVerification.fetchedAt,

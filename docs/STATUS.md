@@ -36,7 +36,7 @@ Próximo passo preciso: ampliar as políticas e testes RLS para entidades privad
 filhas (`GameRevision`, `TrackingSubscription`, assinatura e quotas) e implementar
 gerenciamento de verificação de e-mail/recuperação de senha.
 
-## Correção funcional e visual em andamento
+## Correção funcional e visual concluída localmente
 
 Auditoria atual e plano registrados em `CURRENT_GENERATION_AUDIT.md` e
 `CORRECTION_PLAN.md`. Implementados nesta etapa: endpoint do último resultado
@@ -46,5 +46,21 @@ atômica; arquivamento e acompanhamento; importação administrativa com
 prévia/confirmação; MFA TOTP administrativo; scheduler de coleta no worker; e
 novo shell branco conectado para Início, Análises, Gerar e Meus jogos.
 
-Ainda falta concluir o teste integrado da nova migration, a inspeção visual,
-backup/restauração e a publicação do backend na VPS.
+Concluídos nesta etapa: sete migrations em banco novo, lint, typecheck, 31 testes
+TypeScript, 10 testes Python, sete testes integrados em PostgreSQL/Redis,
+construção das quatro imagens, restauração isolada, smoke HTTP de cadastro →
+geração uniforme → salvamento → nova leitura e inspeção visual em desktop,
+390 px e 360 px. A migration de compatibilidade corrige loterias antigas que
+tinham resultado canônico, mas permaneciam marcadas como `NO_RESULTS`.
+
+O Compose deixa o Caddy no profile explícito `standalone-proxy`; por padrão não
+ocupa 80/443 do Hestia. As imagens iniciaram e os healthchecks individuais
+passaram. Nesta VM Cloud, porém, o tráfego entre containers na bridge Docker
+sofreu timeout, de modo que o smoke funcional foi concluído com os mesmos
+serviços expostos somente em loopback e um proxy local. Isso não deve ser
+registrado como validação integral da rede Compose na VPS.
+
+Pendências externas permanecem: importar/reconciliar o histórico oficial
+completo; obter acesso shell autorizado à VPS para subir API, worker, analytics,
+PostgreSQL e Redis e configurar o include do Hestia; configurar SMTP, billing e
+backup externo. `smart.nonato.me` ainda aponta para o demo estático anterior.
