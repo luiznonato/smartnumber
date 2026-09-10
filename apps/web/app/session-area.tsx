@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Card } from "@atlas/ui";
+import { Button } from "@atlas/ui";
 
 type CurrentUser = { id: string; email: string; role: string };
 
@@ -34,11 +34,16 @@ export function SessionArea({ admin = false }: { admin?: boolean }) {
   if (loading) return <p>Validando sessão…</p>;
   if (!user) return null;
   return (
-    <Card>
-      <h2>{admin ? "Administração" : "Conta autenticada"}</h2>
-      <p>{user.email}</p>
-      <p className="muted">Perfil: {user.role}</p>
-      <Button onClick={logout}>Sair</Button>
-    </Card>
+    <div className="session-strip">
+      <div>
+        <strong>{user.email}</strong>
+        <span className="muted">
+          {admin ? "Administrador" : "Conta autenticada"}
+        </span>
+      </div>
+      <Button className="secondary" onClick={logout}>
+        Sair
+      </Button>
+    </div>
   );
 }
