@@ -34,7 +34,7 @@ def generate(draws:list[list[int]],universe:int,pick:int,count:int,seed:int,stra
  if len(set(fixed))!=len(fixed) or any(n<1 or n>universe for n in fixed+excluded):raise ValueError("invalid constraints")
  pool=np.array([n for n in range(1,universe+1) if n not in fixed and n not in excluded]);need=pick-len(fixed)
  if need<0 or len(pool)<need:raise ValueError("infeasible constraints")
- counts=Counter(x for d in draws for x in d);weights=np.array([counts[int(n)]+1 for n in pool],dtype=float);weights/=weights.sum();rng=_rng(seed);games=[];seen=set();attempts=0
+ recent=draws[-100:];counts=Counter(x for d in recent for x in d);weights=np.array([counts[int(n)]+1 for n in pool],dtype=float);weights/=weights.sum();rng=_rng(seed);games=[];seen=set();attempts=0
  while len(games)<count and attempts<count*500:
   attempts+=1;p=weights if strategy=="recent-frequency" else None;chosen=rng.choice(pool,size=need,replace=False,p=p);nums=tuple(sorted(fixed+chosen.tolist()))
   if nums in seen:continue

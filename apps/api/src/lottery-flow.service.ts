@@ -67,11 +67,11 @@ export class LotteryFlowService {
             contestNumber: input.contestNumber,
           },
         },
-        update: { drawDate: new Date(`${input.drawDate}T12:00:00Z`) },
+        update: { drawDate: new Date(`${input.drawDate}T00:00:00.000Z`) },
         create: {
           lotteryId: lottery.id,
           contestNumber: input.contestNumber,
-          drawDate: new Date(`${input.drawDate}T12:00:00Z`),
+          drawDate: new Date(`${input.drawDate}T00:00:00.000Z`),
         },
         include: { revisions: { orderBy: { revision: "desc" }, take: 1 } },
       });
@@ -80,7 +80,7 @@ export class LotteryFlowService {
           drawId: draw.id,
           revision: (draw.revisions[0]?.revision ?? 0) + 1,
           numbers,
-          originalOrder: input.numbers,
+          originalOrder: input.originalOrder ?? [],
           luckyMonth: input.luckyMonth ?? null,
           confirmation: ConfirmationState.CONFIRMED,
           prizeState: PrizeState.PENDING,
