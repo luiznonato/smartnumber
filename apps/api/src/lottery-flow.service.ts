@@ -107,6 +107,19 @@ export class LotteryFlowService {
       return created;
     });
     await this.evaluateGames(input.lottery, revision.id, numbers, input.luckyMonth);
+    const confirmedCount = await this.prisma.draw.count({
+      where: {
+        lottery: { slug: input.lottery },
+        canonicalRevisionId: { not: null },
+      },
+    });
+    if (confirmedCount < 2) {
+      return {
+        revisionId: revision.id,
+        duplicate: false,
+        analysisStatus: "WAITING_FOR_MINIMUM_HISTORY",
+      };
+    }
     const analysis = await this.recalculate(input.lottery);
     return {
       revisionId: revision.id,
