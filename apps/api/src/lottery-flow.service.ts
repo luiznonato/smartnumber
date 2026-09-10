@@ -13,6 +13,7 @@ import {
 import { RULES, drawSchema, type LotterySlug } from "@atlas/contracts";
 import { createHash, randomInt } from "node:crypto";
 import { PrismaService } from "./database.js";
+import { CaixaServiceBusProvider } from "./ingestion.js";
 
 type AnalyticsGame = {
   numbers: number[];
@@ -22,13 +23,14 @@ type AnalyticsGame = {
 
 @Injectable()
 export class LotteryFlowService {
+  private readonly caixa = new CaixaServiceBusProvider();
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async importConfirmed(raw: unknown) {
+  async importConfirmed(raw: unknown, sourcePayload: unknown = raw) {
     const input = drawSchema.parse(raw);
     const numbers = [...input.numbers].sort((a, b) => a - b);
     const hash = createHash("sha256")
-      .update(JSON.stringify(raw))
+      .update(JSON.stringify(sourcePayload))
       .digest("hex");
     const existing = await this.prisma.drawRevision.findFirst({
       where: {
@@ -84,7 +86,7 @@ export class LotteryFlowService {
           prizeState: PrizeState.PENDING,
           sourceUrl: input.sourceUrl,
           fetchedAt: new Date(input.fetchedAt),
-          rawPayload: raw as Prisma.InputJsonValue,
+          rawPayload: sourcePayload as Prisma.InputJsonValue,
           payloadHash: hash,
           parserVersion: input.parserVersion,
         },
@@ -128,6 +130,42 @@ export class LotteryFlowService {
         analysisStatus: "WAITING_FOR_MINIMUM_HISTORY",
       };
     }
+    const contests = await this.prisma.draw.findMany({
+      where: {
+        lottery: { slug: input.lottery },
+        canonicalRevisionId: { not: null },
+      },
+      orderBy: { contestNumber: "asc" },
+      select: { contestNumber: true },
+    });
+    const gaps: Array<{ after: number; before: number }> = [];
+    for (let index = 1; index < contests.length; index++) {
+      if (
+        contests[index].contestNumber !==
+        contests[index - 1].contestNumber + 1
+      ) {
+        gaps.push({
+          after: contests[index - 1].contestNumber,
+          before: contests[index].contestNumber,
+        });
+      }
+    }
+    if (gaps.length) {
+      await this.prisma.dataQualityIssue.create({
+        data: {
+          lotterySlug: input.lottery,
+          severity: "ERROR",
+          code: "HISTORY_GAP",
+          details: gaps,
+        },
+      });
+      return {
+        revisionId: revision.id,
+        duplicate: false,
+        analysisStatus: "BLOCKED_BY_HISTORY_GAPS",
+        gaps,
+      };
+    }
     const analysis = await this.recalculate(input.lottery);
     return {
       revisionId: revision.id,
@@ -135,6 +173,14 @@ export class LotteryFlowService {
       snapshotId: analysis.snapshotId,
       suggestionBatchId: analysis.batchId,
     };
+  }
+
+  async syncLatest(slug: LotterySlug) {
+    const fetched = (await this.caixa.latest(slug)) as {
+      input: unknown;
+      raw: unknown;
+    };
+    return this.importConfirmed(fetched.input, fetched.raw);
   }
 
   async recalculate(slug: LotterySlug) {

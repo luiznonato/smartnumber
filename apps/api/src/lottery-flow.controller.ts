@@ -26,6 +26,15 @@ export class AdminDrawController {
     await this.auth.authenticate(request, Role.ADMIN);
     return this.flow.recalculate(lotterySlugSchema.parse(lottery));
   }
+
+  @Post(":lottery/sync-latest")
+  async syncLatest(
+    @Req() request: FastifyRequest,
+    @Param("lottery") lottery: string,
+  ) {
+    await this.auth.authenticate(request, Role.ADMIN);
+    return this.flow.syncLatest(lotterySlugSchema.parse(lottery));
+  }
 }
 
 @Controller("suggestions")
