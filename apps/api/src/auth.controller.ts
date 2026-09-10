@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post, Req, Res } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthService } from "./auth.service.js";
@@ -20,7 +20,7 @@ function setSessionCookie(
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
 
   @Post("register")
   async register(
@@ -60,7 +60,7 @@ export class AuthController {
 
 @Controller("admin/auth")
 export class AdminAuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
 
   @Post("login")
   async login(

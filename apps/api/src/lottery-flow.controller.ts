@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post, Req } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import type { FastifyRequest } from "fastify";
 import { lotterySlugSchema } from "@atlas/contracts";
@@ -8,8 +8,8 @@ import { LotteryFlowService } from "./lottery-flow.service.js";
 @Controller("admin/draws")
 export class AdminDrawController {
   constructor(
-    private readonly auth: AuthService,
-    private readonly flow: LotteryFlowService,
+    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(LotteryFlowService) private readonly flow: LotteryFlowService,
   ) {}
 
   @Post("import")
@@ -30,7 +30,9 @@ export class AdminDrawController {
 
 @Controller("suggestions")
 export class SuggestionController {
-  constructor(private readonly flow: LotteryFlowService) {}
+  constructor(
+    @Inject(LotteryFlowService) private readonly flow: LotteryFlowService,
+  ) {}
 
   @Get(":lottery/latest")
   latest(@Param("lottery") lottery: string) {
@@ -41,8 +43,8 @@ export class SuggestionController {
 @Controller("saved-games")
 export class SavedGameController {
   constructor(
-    private readonly auth: AuthService,
-    private readonly flow: LotteryFlowService,
+    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(LotteryFlowService) private readonly flow: LotteryFlowService,
   ) {}
 
   @Get()

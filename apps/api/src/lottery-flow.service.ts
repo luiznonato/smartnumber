@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -21,7 +22,7 @@ type AnalyticsGame = {
 
 @Injectable()
 export class LotteryFlowService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async importConfirmed(raw: unknown) {
     const input = drawSchema.parse(raw);
