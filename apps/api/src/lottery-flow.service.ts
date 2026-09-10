@@ -39,7 +39,15 @@ export class LotteryFlowService {
         payloadHash: hash,
       },
     });
-    if (existing) return { revisionId: existing.id, duplicate: true };
+    if (existing) {
+      await this.evaluateGames(
+        input.lottery,
+        existing.id,
+        existing.numbers,
+        existing.luckyMonth,
+      );
+      return { revisionId: existing.id, duplicate: true, downstreamReplayed: true };
+    }
 
     const revision = await this.prisma.$transaction(async (tx) => {
       const lottery = await tx.lottery.upsert({
@@ -272,30 +280,39 @@ export class LotteryFlowService {
     numbers: number[],
     month?: number | null,
   ) {
-    const games = await this.prisma.savedGame.findMany({
-      where: { lotterySlug: slug },
-    });
-    for (const game of games) {
-      await this.prisma.gameEvaluation.upsert({
-        where: {
-          savedGameId_drawRevisionId: {
-            savedGameId: game.id,
-            drawRevisionId: revisionId,
-          },
-        },
-        update: {
-          numberHits: game.numbers.filter((number) => numbers.includes(number)).length,
-          luckyMonthHit:
-            slug === "dia-de-sorte" ? game.luckyMonth === month : null,
-        },
-        create: {
-          savedGameId: game.id,
-          drawRevisionId: revisionId,
-          numberHits: game.numbers.filter((number) => numbers.includes(number)).length,
-          luckyMonthHit:
-            slug === "dia-de-sorte" ? game.luckyMonth === month : null,
-          mode: "FUTURE_TRACKING",
-        },
+    const users = await this.prisma.user.findMany({ select: { id: true } });
+    for (const user of users) {
+      await this.prisma.withUser(user.id, async (tx) => {
+        const games = await tx.savedGame.findMany({
+          where: { userId: user.id, lotterySlug: slug },
+        });
+        for (const game of games) {
+          await tx.gameEvaluation.upsert({
+            where: {
+              savedGameId_drawRevisionId: {
+                savedGameId: game.id,
+                drawRevisionId: revisionId,
+              },
+            },
+            update: {
+              numberHits: game.numbers.filter((number) =>
+                numbers.includes(number),
+              ).length,
+              luckyMonthHit:
+                slug === "dia-de-sorte" ? game.luckyMonth === month : null,
+            },
+            create: {
+              savedGameId: game.id,
+              drawRevisionId: revisionId,
+              numberHits: game.numbers.filter((number) =>
+                numbers.includes(number),
+              ).length,
+              luckyMonthHit:
+                slug === "dia-de-sorte" ? game.luckyMonth === month : null,
+              mode: "FUTURE_TRACKING",
+            },
+          });
+        }
       });
     }
   }
